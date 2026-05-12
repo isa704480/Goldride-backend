@@ -222,36 +222,7 @@ SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 # CORS
 CORS_ALLOW_ALL_ORIGINS = True 
 CORS_ALLOW_CREDENTIALS = False
-CORS_ALLOWED_ORIGINS = [
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'http://localhost:8081',
-    'http://localhost:19006',
-    'http://127.0.0.1:5173',
-    'https://goldride-admin.vercel.app',
-    'https://goldride-reklama.vercel.app',
-]
-
-CORS_ALLOW_METHODS = [
-    "DELETE",
-    "GET",
-    "OPTIONS",
-    "PATCH",
-    "POST",
-    "PUT",
-]
-
-CORS_ALLOW_HEADERS = [
-    "accept",
-    "accept-encoding",
-    "authorization",
-    "content-type",
-    "dnt",
-    "origin",
-    "user-agent",
-    "x-csrftoken",
-    "x-requested-with",
-]
+CORS_REPLACE_HTTPS_REFERER = True
 
 # OTP Settings
 OTP_EXPIRY_SECONDS = config('OTP_EXPIRY_SECONDS', default=300, cast=int)
