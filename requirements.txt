@@ -28,3 +28,4 @@ urllib3==2.3.0
 cryptography==44.0.0
 pyOpenSSL==24.3.0
 uvicorn==0.34.0
+websockets==14.1

@@ -28,5 +28,5 @@ RUN python manage.py collectstatic --no-input
 # Expose port
 EXPOSE 8000
 
-# Run with uvicorn for ASGI support
-CMD uvicorn config.asgi:application --host 0.0.0.0 --port $PORT
+# Run with daphne for WebSocket support
+CMD daphne -b 0.0.0.0 -p $PORT config.asgi:application
