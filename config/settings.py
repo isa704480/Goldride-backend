@@ -28,11 +28,12 @@ if config('RAILWAY_STATIC_URL', default=''):
 if config('RAILWAY_PUBLIC_DOMAIN', default=''):
     ALLOWED_HOSTS.append(config('RAILWAY_PUBLIC_DOMAIN'))
 
-# CSRF Trusted Origins
 CSRF_TRUSTED_ORIGINS = [
     'https://' + host for host in ALLOWED_HOSTS if host != '*'
 ]
 CSRF_TRUSTED_ORIGINS.append('http://localhost:8081') # For Expo dev
+CSRF_TRUSTED_ORIGINS.append('https://goldride-admin.vercel.app')
+CSRF_TRUSTED_ORIGINS.append('https://goldride-reklama.vercel.app')
 
 
 # Application definition
@@ -214,14 +215,18 @@ SIMPLE_JWT = {
 }
 
 # CORS
-CORS_ALLOW_ALL_ORIGINS = DEBUG
-CORS_ALLOWED_ORIGINS = [
+CORS_ALLOW_ALL_ORIGINS = config('CORS_ALLOW_ALL_ORIGINS', default=DEBUG, cast=bool)
+CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='').split(',') if config('CORS_ALLOWED_ORIGINS', default='') else [
     'http://localhost:3000',
     'http://localhost:5173',
     'http://localhost:8081',
     'http://localhost:19006',
     'http://127.0.0.1:5173',
+    'https://goldride-admin.vercel.app',
+    'https://goldride-reklama.vercel.app',
 ]
+if not CORS_ALLOWED_ORIGINS[0]: # handle empty split
+    CORS_ALLOWED_ORIGINS = []
 
 # OTP Settings
 OTP_EXPIRY_SECONDS = config('OTP_EXPIRY_SECONDS', default=300, cast=int)
