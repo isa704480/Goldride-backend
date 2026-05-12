@@ -3,6 +3,8 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from rest_framework import permissions
+from rest_framework.response import Response
+from rest_framework.decorators import api_view, permission_classes
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
 
@@ -19,14 +21,19 @@ schema_view = get_schema_view(
     permission_classes=(permissions.AllowAny,),
 )
 
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def health_check(request):
+    return Response({"status": "healthy"})
+
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('api/health/', health_check, name='health-check'),
     path('api/auth/', include('accounts.urls')),
     path('api/rides/', include('rides.urls')),
     path('api/pricing/', include('pricing.urls')),
     
     # Branded API Documentation (Swagger & ReDoc)
-    # Using 'swagger_ui.html' to address "swagger unday emas" (OLED-Black/Gold theme)
     path('docs/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
 ]

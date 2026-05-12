@@ -232,6 +232,27 @@ CORS_ALLOWED_ORIGINS = [
     'https://goldride-reklama.vercel.app',
 ]
 
+CORS_ALLOW_METHODS = [
+    "DELETE",
+    "GET",
+    "OPTIONS",
+    "PATCH",
+    "POST",
+    "PUT",
+]
+
+CORS_ALLOW_HEADERS = [
+    "accept",
+    "accept-encoding",
+    "authorization",
+    "content-type",
+    "dnt",
+    "origin",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
+]
+
 # OTP Settings
 OTP_EXPIRY_SECONDS = config('OTP_EXPIRY_SECONDS', default=300, cast=int)
 OTP_LENGTH = config('OTP_LENGTH', default=4, cast=int)
