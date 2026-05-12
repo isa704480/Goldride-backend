@@ -1,0 +1,21 @@
+{% extends "drf-yasg/swagger-ui.html" %}
+
+{% block extra_head %}
+<style>
+    /* Goldride Premium Swagger Theme */
+    body { background-color: #000 !important; color: #fff !important; }
+    .swagger-ui { filter: invert(0.9) hue-rotate(180deg); } /* Fast dark mode trick */
+    .swagger-ui .topbar { background-color: #111 !important; border-bottom: 2px solid #FFB800 !important; }
+    .swagger-ui .topbar .link { visibility: hidden; }
+    .swagger-ui .topbar .link::after { 
+        content: "GOLDRIDE API — COMMAND CENTER"; 
+        visibility: visible; 
+        color: #FFB800; font-weight: 800; font-family: 'Syne', sans-serif;
+        font-size: 1.2rem;
+    }
+    .swagger-ui .info .title { color: #FFB800 !important; }
+    .swagger-ui .btn.authorize { color: #000 !important; background-color: #FFB800 !important; border-color: #FFB800 !important; }
+    .swagger-ui .opblock.opblock-get { background: rgba(255,184,0,0.05); border-color: #FFB800; }
+</style>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@800&display=swap" rel="stylesheet">
+{% endblock %}

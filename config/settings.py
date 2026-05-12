@@ -1,0 +1,301 @@
+import os
+from pathlib import Path
+from datetime import timedelta
+from decouple import config
+import dj_database_url
+
+# import sentry_sdk
+# from sentry_sdk.integrations.django import DjangoIntegration
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Sentry Monitoring
+# SENTRY_DSN = config('SENTRY_DSN', default='')
+# if SENTRY_DSN:
+#     sentry_sdk.init(
+#         dsn=SENTRY_DSN,
+#         integrations=[DjangoIntegration()],
+#         traces_sample_rate=1.0,
+#         send_default_pii=True
+#     )
+
+SECRET_KEY = config('SECRET_KEY', default='django-insecure-dev-key')
+DEBUG = config('DEBUG', default=True, cast=bool)
+
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='*').split(',')
+if config('RAILWAY_STATIC_URL', default=''):
+    ALLOWED_HOSTS.append(config('RAILWAY_STATIC_URL'))
+if config('RAILWAY_PUBLIC_DOMAIN', default=''):
+    ALLOWED_HOSTS.append(config('RAILWAY_PUBLIC_DOMAIN'))
+
+# CSRF Trusted Origins
+CSRF_TRUSTED_ORIGINS = [
+    'https://' + host for host in ALLOWED_HOSTS if host != '*'
+]
+CSRF_TRUSTED_ORIGINS.append('http://localhost:8081') # For Expo dev
+
+
+# Application definition
+INSTALLED_APPS = [
+    'daphne',
+    'django.contrib.admin',
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+    # Third party
+    'rest_framework',
+    'rest_framework_simplejwt',
+    'corsheaders',
+    'django_filters',
+    'channels',
+    # Local apps
+    'accounts',
+    'rides',
+    'pricing',
+    'matching',
+    'realtime',
+    'drf_yasg',
+]
+
+MIDDLEWARE = [
+    'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+]
+
+ROOT_URLCONF = 'config.urls'
+
+TEMPLATES = [
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': [BASE_DIR / 'templates'],
+        'APP_DIRS': True,
+        'OPTIONS': {
+            'context_processors': [
+                'django.template.context_processors.debug',
+                'django.template.context_processors.request',
+                'django.contrib.auth.context_processors.auth',
+                'django.contrib.messages.context_processors.messages',
+            ],
+        },
+    },
+]
+
+WSGI_APPLICATION = 'config.wsgi.application'
+ASGI_APPLICATION = 'config.asgi.application'
+
+# Database — SQLite for dev, PostgreSQL for production
+USE_POSTGRES = config('USE_POSTGRES', default=False, cast=bool)
+DATABASE_URL = config('DATABASE_URL', default='')
+
+if DATABASE_URL:
+    DATABASES = {
+        'default': dj_database_url.config(default=DATABASE_URL, conn_max_age=600)
+    }
+elif USE_POSTGRES:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': config('DB_NAME', default='taksi_db'),
+            'USER': config('DB_USER', default='taksi_user'),
+            'PASSWORD': config('DB_PASSWORD', default='taksi_pass_2026'),
+            'HOST': config('DB_HOST', default='localhost'),
+            'PORT': config('DB_PORT', default='5432'),
+        }
+    }
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
+
+# Cache — Redis for production, local memory for dev
+USE_REDIS = config('USE_REDIS', default=False, cast=bool)
+
+if USE_REDIS:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django_redis.cache.RedisCache',
+            'LOCATION': config('CACHE_REDIS_URL', default='redis://localhost:6379/1'),
+            'OPTIONS': {
+                'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            }
+        }
+    }
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                'hosts': [config('REDIS_URL', default='redis://localhost:6379/0')],
+            },
+        },
+    }
+else:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        }
+    }
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels.layers.InMemoryChannelLayer',
+        },
+    }
+
+# Password validation
+AUTH_PASSWORD_VALIDATORS = [
+    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
+]
+
+# Custom user model
+AUTH_USER_MODEL = 'accounts.User'
+
+# Internationalization
+LANGUAGE_CODE = 'uz'
+TIME_ZONE = 'Asia/Tashkent'
+USE_I18N = True
+USE_TZ = True
+
+# Static files
+STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
+
+# Media files
+MEDIA_URL = 'media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# REST Framework
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated',
+    ),
+    'DEFAULT_FILTER_BACKENDS': (
+        'django_filters.rest_framework.DjangoFilterBackend',
+        'rest_framework.filters.SearchFilter',
+        'rest_framework.filters.OrderingFilter',
+    ),
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 20,
+}
+
+# JWT Settings
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(days=7),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
+    'ROTATE_REFRESH_TOKENS': True,
+    'AUTH_HEADER_TYPES': ('Bearer',),
+}
+
+# CORS
+CORS_ALLOW_ALL_ORIGINS = DEBUG
+CORS_ALLOWED_ORIGINS = [
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'http://localhost:8081',
+    'http://localhost:19006',
+    'http://127.0.0.1:5173',
+]
+
+# OTP Settings
+OTP_EXPIRY_SECONDS = config('OTP_EXPIRY_SECONDS', default=300, cast=int)
+OTP_LENGTH = config('OTP_LENGTH', default=4, cast=int)
+
+# SMS/OTP Settings
+OTP_PROVIDER = config('OTP_PROVIDER', default='simulation') # 'simulation', 'eskiz', 'telegram', 'email'
+SMS_PROVIDER = OTP_PROVIDER # Backward compatibility
+
+# Eskiz
+ESKIZ_EMAIL = config('ESKIZ_EMAIL', default='')
+ESKIZ_PASSWORD = config('ESKIZ_PASSWORD', default='')
+ESKIZ_TOKEN_CACHE_KEY = 'eskiz_token'
+
+# Telegram OTP
+TELEGRAM_BOT_TOKEN = config('TELEGRAM_BOT_TOKEN', default='')
+TELEGRAM_ADMIN_CHAT_ID = config('TELEGRAM_ADMIN_CHAT_ID', default='') # Chat where OTPs will be sent in 'telegram' mode
+
+# Email OTP (Gmail/SMTP)
+OTP_EMAIL_RECIPIENT = config('OTP_EMAIL_RECIPIENT', default='admin@goldride.uz')
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+
+# Pricing Settings (UZS)
+PRICING = {
+    'BASE_FARE': config('BASE_FARE', default=5000, cast=int),
+    'PER_KM_RATE': config('PER_KM_RATE', default=2000, cast=int),
+    'SHARED_DISCOUNT': config('SHARED_DISCOUNT', default=0.30, cast=float),
+    'COMMISSION_RATE': config('COMMISSION_RATE', default=0.05, cast=float),
+    'MIN_FARE': 3000,
+    'MAX_PASSENGERS_PER_RIDE': 2,
+}
+
+# Matching Settings
+MATCHING = {
+    'SEARCH_RADIUS_KM': 5,
+    'MAX_ROUTE_DEVIATION': 0.20,
+    'MATCH_TIME_WINDOW_MINUTES': 5,
+    'DRIVER_LOCATION_UPDATE_INTERVAL': 3,
+}
+
+# Happy Hours — Kam komissiya vaqtlari
+# Masalan, 07:00-09:00 va 17:00-19:00 da komissiya 2% bo'ladi (odatiy 5%)
+HAPPY_HOURS = [
+    {'start': '07:00', 'end': '09:00', 'commission_rate': 0.02, 'label': 'Ertalabki soatlar'},
+    {'start': '17:00', 'end': '19:00', 'commission_rate': 0.02, 'label': 'Kechki soatlar'},
+]
+
+# Haydovchi minimal balans sozlamalari (UZS)
+DRIVER_BALANCE = {
+    'FIRST_MONTH_MINIMUM': 10000,   # 1-oy ichida minimal balans (bonus bilan kirish uchun)
+    'AFTER_MONTH_MINIMUM': 20000,   # 2+ oydan keyingi minimal balans
+    'SIGNUP_BONUS': 20000,          # Yangi haydovchiga beriladigan bonus
+    'FIRST_MONTH_DAYS': 30,         # 1-oy davomiyligi (kunlarda)
+}
+
+# Yo'lovchi bekor qilish jarimasi
+CANCELLATION_POLICY = {
+    'MAX_CANCELLATIONS': 3,         # Maksimal ketma-ket bekor qilish
+    'TIME_WINDOW_HOURS': 1,         # Sanash uchun vaqt oynasi (soat)
+    'PENALTY_STEP_1': 1000,         # 1-bekor qilish jarimasi
+    'PENALTY_STEP_2': 2000,         # 2-bekor qilish jarimasi
+    'PENALTY_BLOCK': 5000,          # 3-va undan keyingi jarima (bloklashdan oldin)
+}
+
+# Geo-fencing: Faqat Toshkent ichida ishlash uchun
+TASHKENT_BOUNDARY = {
+    'LAT_MIN': 41.15,
+    'LAT_MAX': 41.45,
+    'LNG_MIN': 69.05,
+    'LNG_MAX': 69.50,
+}
