@@ -23,6 +23,8 @@ SECRET_KEY = config('SECRET_KEY', default='django-insecure-dev-key')
 DEBUG = config('DEBUG', default=True, cast=bool)
 
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='*').split(',')
+ALLOWED_HOSTS.append('goldride-backend-production.up.railway.app')
+ALLOWED_HOSTS.append('goldride-admin.vercel.app')
 if config('RAILWAY_STATIC_URL', default=''):
     ALLOWED_HOSTS.append(config('RAILWAY_STATIC_URL'))
 if config('RAILWAY_PUBLIC_DOMAIN', default=''):
@@ -61,10 +63,10 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
