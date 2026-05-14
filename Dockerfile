@@ -28,5 +28,5 @@ RUN python manage.py collectstatic --no-input
 # Expose port
 EXPOSE 8000
 
-# Run with daphne for WebSocket support
-CMD daphne -b 0.0.0.0 -p $PORT config.asgi:application
+# Run migrations and start server
+CMD python manage.py migrate --no-input && daphne -b 0.0.0.0 -p $PORT config.asgi:application

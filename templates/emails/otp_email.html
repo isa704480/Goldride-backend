@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Goldride Tasdiqlash Kodi</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #1a1a1a;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+        }
+        .container {
+            max-width: 600px;
+            margin: 40px auto;
+            background: #ffffff;
+            border-radius: 24px;
+            overflow: hidden;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        .header {
+            background-color: #000000;
+            padding: 50px 20px;
+            text-align: center;
+            background-image: radial-gradient(circle at 50% 50%, #1a1a1a 0%, #000000 100%);
+        }
+        .logo {
+            font-size: 36px;
+            font-weight: 900;
+            color: #ffffff;
+            text-decoration: none;
+            letter-spacing: -1.5px;
+            text-transform: uppercase;
+        }
+        .gold {
+            color: #FFB800;
+        }
+        .content {
+            padding: 50px 40px;
+            text-align: center;
+        }
+        .title {
+            font-size: 28px;
+            font-weight: 800;
+            color: #000000;
+            margin-bottom: 12px;
+            letter-spacing: -0.5px;
+        }
+        .subtitle {
+            font-size: 16px;
+            color: #666666;
+            margin-bottom: 40px;
+            max-width: 400px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .otp-box {
+            background: #fdfaf0;
+            border: 2px solid #FFB800;
+            border-radius: 20px;
+            padding: 40px;
+            margin: 30px 0;
+            display: inline-block;
+            min-width: 280px;
+            box-shadow: 0 10px 20px rgba(255, 184, 0, 0.1);
+        }
+        .otp-code {
+            font-size: 56px;
+            font-weight: 900;
+            color: #000000;
+            letter-spacing: 14px;
+            margin: 0;
+            line-height: 1;
+        }
+        .timer {
+            font-size: 14px;
+            font-weight: 600;
+            color: #FFB800;
+            margin-top: 20px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .footer {
+            background: #fafafa;
+            padding: 40px;
+            text-align: center;
+            font-size: 14px;
+            color: #999999;
+            border-top: 1px solid #eeeeee;
+        }
+        .social-links {
+            margin-bottom: 25px;
+        }
+        .social-links a {
+            margin: 0 15px;
+            color: #000000;
+            text-decoration: none;
+            font-weight: 700;
+            font-size: 15px;
+        }
+        .warning {
+            font-size: 12px;
+            color: #cccccc;
+            margin-top: 25px;
+            line-height: 1.4;
+        }
+        .button {
+            display: inline-block;
+            padding: 16px 32px;
+            background-color: #000000;
+            color: #ffffff;
+            text-decoration: none;
+            border-radius: 12px;
+            font-weight: 700;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">Gold<span class="gold">ride</span></div>
+        </div>
+        <div class="content">
+            <h1 class="title">Xavfsiz kirish</h1>
+            <p class="subtitle">Goldride tizimiga kirishingizni tasdiqlash uchun quyidagi bir martalik koddan foydalaning:</p>
+            
+            <div class="otp-box">
+                <p class="otp-code">{{ otp_code }}</p>
+                <div class="timer">KOD 10 DAQIQA AMAL QILADI</div>
+            </div>
+
+            <p style="margin-top: 40px; font-size: 15px; color: #555555; line-height: 1.8;">
+                Agar siz ushbu kodni so'ramagan bo'lsangiz, xavfsizligingiz uchun ushbu xatni e'tiborsiz qoldiring. <br>
+                <strong>Eslatma:</strong> Goldride xodimlari hech qachon sizdan ushbu kodni so'rashmaydi.
+            </p>
+        </div>
+        <div class="footer">
+            <div class="social-links">
+                <a href="https://goldride.uz">Veb-sayt</a>
+                <a href="#">Telegram</a>
+                <a href="#">Instagram</a>
+            </div>
+            <p>&copy; 2026 Goldride Taxi Ecosystem. <br>Barcha huquqlar himoyalangan.</p>
+            <p class="warning">Bu tizim tomonidan avtomatik yuborilgan xabar. <br>Iltimos, unga javob qaytarmang.</p>
+        </div>
+    </div>
+</body>
+</html>
