@@ -28,5 +28,6 @@ RUN python manage.py collectstatic --no-input
 # Expose port
 EXPOSE 8000
 
-# Run migrations and start server
-CMD python manage.py migrate --no-input && daphne -b 0.0.0.0 -p $PORT config.asgi:application
+# Run startup script
+RUN chmod +x /app/start.sh
+CMD ["/app/start.sh"]
