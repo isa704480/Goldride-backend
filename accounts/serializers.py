@@ -39,10 +39,10 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'role', 'avatar', 'language', 'is_verified',
             'has_driver_profile', 'gold_points', 'bank_account_id',
             'id_number', 'referral_code', 'telegram_username', 'telegram_chat_id',
-            'passenger_rating', 'total_passenger_rides',
+            'passenger_rating', 'total_passenger_rides', 'has_agreed_to_terms',
             'created_at', 'is_active'
         ]
-        read_only_fields = ['id', 'phone', 'is_verified', 'gold_points', 'id_number', 'referral_code', 'passenger_rating', 'total_passenger_rides', 'created_at', 'is_active']
+        read_only_fields = ['id', 'phone', 'is_verified', 'gold_points', 'id_number', 'referral_code', 'passenger_rating', 'total_passenger_rides', 'has_agreed_to_terms', 'created_at', 'is_active']
 
     def get_has_driver_profile(self, obj):
         return hasattr(obj, 'driver_profile')
@@ -57,7 +57,9 @@ class VehicleSerializer(serializers.ModelSerializer):
         model = Vehicle
         fields = [
             'id', 'make', 'model', 'year', 'color', 'color_display',
-            'plate_number', 'vehicle_type', 'type_display', 'car_class', 'car_class_display', 'photo'
+            'plate_number', 'vehicle_type', 'type_display', 'car_class', 'car_class_display', 
+            'photo', 'photo_back', 'photo_left', 'photo_right', 'interior_photo_1', 'interior_photo_2',
+            'tech_passport_photo_front', 'tech_passport_photo_back'
         ]
 
 
@@ -72,6 +74,22 @@ class DriverRegistrationSerializer(serializers.Serializer):
     plate_number = serializers.CharField(max_length=15)
     vehicle_type = serializers.CharField(max_length=10, default='sedan')
     vehicle_photo = serializers.ImageField(required=False)
+    # New document fields
+    license_photo_back = serializers.ImageField(required=False)
+    passport_photo_front = serializers.ImageField(required=False)
+    passport_photo_back = serializers.ImageField(required=False)
+    face_id_photo = serializers.ImageField(required=False)
+    taxi_license_photo = serializers.FileField(required=False)
+    # New vehicle fields
+    photo_back = serializers.ImageField(required=False)
+    photo_left = serializers.ImageField(required=False)
+    photo_right = serializers.ImageField(required=False)
+    interior_photo_1 = serializers.ImageField(required=False)
+    interior_photo_2 = serializers.ImageField(required=False)
+    tech_passport_photo_front = serializers.ImageField(required=False)
+    tech_passport_photo_back = serializers.ImageField(required=False)
+    # Agreement
+    has_agreed_to_terms = serializers.BooleanField(default=False)
 
     def create(self, validated_data):
         user = self.context['request'].user
@@ -82,6 +100,11 @@ class DriverRegistrationSerializer(serializers.Serializer):
             user=user,
             license_number=validated_data['license_number'],
             license_photo=validated_data.get('license_photo'),
+            license_photo_back=validated_data.get('license_photo_back'),
+            passport_photo_front=validated_data.get('passport_photo_front'),
+            passport_photo_back=validated_data.get('passport_photo_back'),
+            face_id_photo=validated_data.get('face_id_photo'),
+            taxi_license_photo=validated_data.get('taxi_license_photo'),
         )
 
         Vehicle.objects.create(
@@ -93,6 +116,13 @@ class DriverRegistrationSerializer(serializers.Serializer):
             plate_number=validated_data['plate_number'],
             vehicle_type=validated_data.get('vehicle_type', 'sedan'),
             photo=validated_data.get('vehicle_photo'),
+            photo_back=validated_data.get('photo_back'),
+            photo_left=validated_data.get('photo_left'),
+            photo_right=validated_data.get('photo_right'),
+            interior_photo_1=validated_data.get('interior_photo_1'),
+            interior_photo_2=validated_data.get('interior_photo_2'),
+            tech_passport_photo_front=validated_data.get('tech_passport_photo_front'),
+            tech_passport_photo_back=validated_data.get('tech_passport_photo_back'),
         )
 
         return driver

@@ -88,19 +88,36 @@ class TelegramProvider(BaseSMSProvider):
             return False
 
 class EmailProvider(BaseSMSProvider):
-    """Sends OTP via Email (Gmail/SMTP)"""
+    """Sends OTP via rich HTML Email (Gmail/SMTP)"""
     def send_sms(self, phone: str, message: str) -> bool:
-        from django.core.mail import send_mail
+        from django.core.mail import EmailMultiAlternatives
+        from django.template.loader import render_to_string
+        from django.utils.html import strip_tags
+        
         # In this context, 'phone' is the email address identifier
-        target_email = phone 
+        # 'message' is usually just the OTP code string
+        target_email = phone
+        otp_code = message
+
         try:
-            send_mail(
-                'Goldride Tasdiqlash Kodi',
-                message,
-                settings.DEFAULT_FROM_EMAIL,
-                [target_email],
-                fail_silently=False,
+            subject = f'{otp_code} - Goldride tasdiqlash kodi'
+            from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', 'Goldride <noreply@goldride.uz>')
+            
+            # HTML shablonni render qilish
+            context = {'otp_code': otp_code}
+            html_content = render_to_string('emails/otp_email.html', context)
+            text_content = strip_tags(html_content) # HTMLni qo'llamaydigan mijozlar uchun
+
+            msg = EmailMultiAlternatives(
+                subject, 
+                text_content, 
+                from_email, 
+                [target_email]
             )
+            msg.attach_alternative(html_content, "text/html")
+            msg.send(fail_silently=False)
+            
+            logger.info(f"Premium HTML email sent to {target_email}")
             return True
         except Exception as e:
             logger.error(f"Email error: {e}")

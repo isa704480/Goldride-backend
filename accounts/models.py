@@ -145,6 +145,10 @@ class User(AbstractUser):
         unique=True,
         verbose_name='Telegram Chat ID'
     )
+    has_agreed_to_terms = models.BooleanField(
+        default=False,
+        verbose_name='Shartnomaga rozilik'
+    )
 
     def add_gold_points(self, points):
         """Helper to add points safely."""
@@ -211,7 +215,37 @@ class Driver(models.Model):
         upload_to='licenses/',
         null=True,
         blank=True,
-        verbose_name='Guvohnoma rasmi'
+        verbose_name='Guvohnoma rasmi (Oldi)'
+    )
+    license_photo_back = models.ImageField(
+        upload_to='licenses/',
+        null=True,
+        blank=True,
+        verbose_name='Guvohnoma rasmi (Orqa)'
+    )
+    passport_photo_front = models.ImageField(
+        upload_to='passports/',
+        null=True,
+        blank=True,
+        verbose_name='Pasport rasmi (Oldi)'
+    )
+    passport_photo_back = models.ImageField(
+        upload_to='passports/',
+        null=True,
+        blank=True,
+        verbose_name='Pasport rasmi (Orqa)'
+    )
+    face_id_photo = models.ImageField(
+        upload_to='face_id/',
+        null=True,
+        blank=True,
+        verbose_name='Face ID rasmi'
+    )
+    taxi_license_photo = models.FileField(
+        upload_to='taxi_licenses/',
+        null=True,
+        blank=True,
+        verbose_name='Taksi litsenziyasi (PDF/Rasm)'
     )
     status = models.CharField(
         max_length=10,
@@ -357,7 +391,49 @@ class Vehicle(models.Model):
         upload_to='vehicles/',
         null=True,
         blank=True,
-        verbose_name='Mashina rasmi'
+        verbose_name='Mashina rasmi (Oldi)'
+    )
+    photo_back = models.ImageField(
+        upload_to='vehicles/',
+        null=True,
+        blank=True,
+        verbose_name='Mashina rasmi (Orqa)'
+    )
+    photo_left = models.ImageField(
+        upload_to='vehicles/',
+        null=True,
+        blank=True,
+        verbose_name='Mashina rasmi (Chap)'
+    )
+    photo_right = models.ImageField(
+        upload_to='vehicles/',
+        null=True,
+        blank=True,
+        verbose_name='Mashina rasmi (O\'ng)'
+    )
+    interior_photo_1 = models.ImageField(
+        upload_to='vehicles/interior/',
+        null=True,
+        blank=True,
+        verbose_name='Salon rasmi 1'
+    )
+    interior_photo_2 = models.ImageField(
+        upload_to='vehicles/interior/',
+        null=True,
+        blank=True,
+        verbose_name='Salon rasmi 2'
+    )
+    tech_passport_photo_front = models.ImageField(
+        upload_to='tech_passports/',
+        null=True,
+        blank=True,
+        verbose_name='Texpasport rasmi (Oldi)'
+    )
+    tech_passport_photo_back = models.ImageField(
+        upload_to='tech_passports/',
+        null=True,
+        blank=True,
+        verbose_name='Texpasport rasmi (Orqa)'
     )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
