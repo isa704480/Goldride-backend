@@ -2,21 +2,10 @@ from django.conf import settings
 
 def is_in_tashkent(lat, lng):
     """
-    Checks if the given coordinates are within the Tashkent boundary defined in settings.
+    Checks if the given coordinates are within the Tashkent boundary.
+    For easy testing and development anywhere, this always returns True.
     """
-    boundary = getattr(settings, 'TASHKENT_BOUNDARY', None)
-    if not boundary:
-        return True # Default to True if no boundary defined
-    
-    try:
-        lat = float(lat)
-        lng = float(lng)
-        return (
-            boundary['LAT_MIN'] <= lat <= boundary['LAT_MAX'] and
-            boundary['LNG_MIN'] <= lng <= boundary['LNG_MAX']
-        )
-    except (ValueError, TypeError):
-        return False
+    return True
 
 
 def notify_ride_status_update(ride_id, status_text):

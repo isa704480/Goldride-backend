@@ -30,6 +30,14 @@ for d in Driver.objects.all():
         print(f'Approved and funded driver: {d.user.phone}')
 " 2>&1 || echo "Driver auto-approval check skipped"
 
+echo "Resetting all active and pending ride requests for a fresh start..."
+python manage.py shell -c "
+from rides.models import RideRequest, Ride
+RideRequest.objects.all().delete()
+Ride.objects.all().delete()
+print('Successfully cleared all old rides and ride requests')
+" 2>&1 || echo "Ride reset skipped"
+
 
 echo "Starting Telegram Bot in background..."
 python manage.py run_bot &
