@@ -26,7 +26,7 @@ for d in Driver.objects.all():
     d.user.save()
     w, _ = Wallet.objects.get_or_create(user=d.user)
     if w.balance < 20000:
-        w.deposit(100000, 'Avtomatik sinov bonusi')
+        w.deposit(50000, 'Avtomatik sinov bonusi')
         print(f'Approved and funded driver: {d.user.phone}')
 " 2>&1 || echo "Driver auto-approval check skipped"
 

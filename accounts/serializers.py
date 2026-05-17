@@ -112,7 +112,7 @@ class DriverRegistrationSerializer(serializers.Serializer):
         # Give welcome signup bonus to wallet
         from django.conf import settings as conf_settings
         from accounts.models import Wallet
-        bonus = 100000
+        bonus = 50000
         if hasattr(conf_settings, 'DRIVER_BALANCE') and 'SIGNUP_BONUS' in conf_settings.DRIVER_BALANCE:
             bonus = conf_settings.DRIVER_BALANCE['SIGNUP_BONUS']
         
