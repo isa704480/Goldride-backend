@@ -187,14 +187,15 @@ def verify_otp_view(request):
             'username': phone,
             'device_id': device_id,
             'last_ip': ip,
-            'is_verified': True,
-            'referred_by_code': referral_code
+            'is_verified': True
         }
     )
 
     if created and referral_code:
         # Award bonus to the NEW user for using a referral code
         # (The inviter's bonus is handled per-ride, but we can also log it here)
+        if user.bonus_balance is None:
+            user.bonus_balance = Decimal('0')
         user.bonus_balance += Decimal('10000')
         user.save(update_fields=['bonus_balance'])
         
@@ -267,12 +268,13 @@ def login_direct_view(request):
         phone=phone,
         defaults={
             'username': phone, 
-            'is_verified': True,
-            'referred_by_code': ref_code
+            'is_verified': True
         }
     )
 
     if created and ref_code:
+        if user.bonus_balance is None:
+            user.bonus_balance = Decimal('0')
         user.bonus_balance += Decimal('10000')
         user.save(update_fields=['bonus_balance'])
         
