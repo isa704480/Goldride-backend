@@ -16,5 +16,8 @@ else:
     print('Superuser already exists')
 " 2>&1 || echo "Superuser check skipped"
 
+echo "Starting Telegram Bot in background..."
+python manage.py run_bot &
+
 echo "Starting Daphne server on port ${PORT:-8000}..."
 exec daphne -b 0.0.0.0 -p ${PORT:-8000} config.asgi:application
