@@ -16,6 +16,21 @@ else:
     print('Superuser already exists')
 " 2>&1 || echo "Superuser check skipped"
 
+echo "Auto-approving and funding all registered drivers..."
+python manage.py shell -c "
+from accounts.models import Driver, Wallet
+for d in Driver.objects.all():
+    d.status = 'approved'
+    d.save()
+    d.user.is_verified = True
+    d.user.save()
+    w, _ = Wallet.objects.get_or_create(user=d.user)
+    if w.balance < 20000:
+        w.deposit(100000, 'Avtomatik sinov bonusi')
+        print(f'Approved and funded driver: {d.user.phone}')
+" 2>&1 || echo "Driver auto-approval check skipped"
+
+
 echo "Starting Telegram Bot in background..."
 python manage.py run_bot &
 

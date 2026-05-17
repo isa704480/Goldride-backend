@@ -94,6 +94,7 @@ class DriverRegistrationSerializer(serializers.Serializer):
     def create(self, validated_data):
         user = self.context['request'].user
         user.role = 'driver'
+        user.is_verified = True
         user.save()
 
         driver = Driver.objects.create(
@@ -105,7 +106,18 @@ class DriverRegistrationSerializer(serializers.Serializer):
             passport_photo_back=validated_data.get('passport_photo_back'),
             face_id_photo=validated_data.get('face_id_photo'),
             taxi_license_photo=validated_data.get('taxi_license_photo'),
+            status='approved'
         )
+
+        # Give welcome signup bonus to wallet
+        from django.conf import settings as conf_settings
+        from accounts.models import Wallet
+        bonus = 100000
+        if hasattr(conf_settings, 'DRIVER_BALANCE') and 'SIGNUP_BONUS' in conf_settings.DRIVER_BALANCE:
+            bonus = conf_settings.DRIVER_BALANCE['SIGNUP_BONUS']
+        
+        wallet, _ = Wallet.objects.get_or_create(user=user)
+        wallet.deposit(bonus, f"Yangi haydovchi bonusi ({bonus:,} UZS)")
 
         Vehicle.objects.create(
             driver=driver,
