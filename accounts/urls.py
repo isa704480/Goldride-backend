@@ -15,6 +15,7 @@ urlpatterns = [
     # Registration
     path('register/', views.register_user_view, name='register-user'),
     path('register/driver/', views.register_driver_view, name='register-driver'),
+    path('register/driver/public/', views.register_driver_public_view, name='register-driver-public'),
 
     # Profile
     path('profile/', views.UserProfileView.as_view(), name='user-profile'),

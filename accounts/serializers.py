@@ -226,3 +226,26 @@ class WalletRequestSerializer(serializers.ModelSerializer):
             'admin_comment', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'user', 'status', 'admin_comment', 'created_at', 'updated_at']
+
+
+class DriverPublicRegistrationSerializer(serializers.Serializer):
+    phone = serializers.CharField(max_length=13)
+    first_name = serializers.CharField(max_length=50)
+    last_name = serializers.CharField(max_length=50)
+    license_number = serializers.CharField(max_length=20)
+    make = serializers.CharField(max_length=50)
+    vehicle_model = serializers.CharField(max_length=50)
+    year = serializers.IntegerField()
+    color = serializers.CharField(max_length=10)
+    plate_number = serializers.CharField(max_length=15)
+    vehicle_type = serializers.CharField(max_length=10, default='sedan')
+
+    def validate_phone(self, value):
+        if value and not value.startswith('+'):
+            value = '+' + value
+        if not value.startswith('+998') or len(value) != 13:
+            raise serializers.ValidationError(
+                "Telefon raqami +998XXXXXXXXX formatida bo'lishi kerak."
+            )
+        return value
+

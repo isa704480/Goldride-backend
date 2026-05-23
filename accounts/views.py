@@ -18,6 +18,7 @@ from .serializers import (
     SavedLocationSerializer,
     WalletSerializer,
     WalletRequestSerializer,
+    DriverPublicRegistrationSerializer,
 )
 from .utils import send_telegram_notification
 from django.conf import settings
@@ -385,6 +386,75 @@ def register_driver_view(request):
 
     return Response(
         DriverProfileSerializer(driver).data,
+        status=status.HTTP_201_CREATED
+    )
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def register_driver_public_view(request):
+    """Register as a driver publicly from the website (landing page)."""
+    serializer = DriverPublicRegistrationSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    
+    phone = serializer.validated_data['phone']
+    first_name = serializer.validated_data['first_name']
+    last_name = serializer.validated_data['last_name']
+    license_number = serializer.validated_data['license_number']
+    
+    # Check if user already exists
+    user, created = User.objects.get_or_create(
+        phone=phone,
+        defaults={
+            'username': phone,
+            'first_name': first_name,
+            'last_name': last_name,
+            'role': 'driver',
+            'is_verified': True
+        }
+    )
+    
+    if not created:
+        # If user exists, update their role and verification status
+        user.role = 'driver'
+        user.is_verified = True
+        if not user.first_name:
+            user.first_name = first_name
+        if not user.last_name:
+            user.last_name = last_name
+        user.save()
+        
+    # Check if driver profile already exists
+    if hasattr(user, 'driver_profile'):
+        return Response(
+            {'detail': 'Ushbu telefon raqami bilan haydovchi allaqachon ro\'yxatdan o\'tgan.'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+        
+    driver = Driver.objects.create(
+        user=user,
+        license_number=license_number,
+        status='pending'  # pending, so it appears in the admin panel!
+    )
+    
+    # Create the Vehicle
+    from .models import Vehicle
+    Vehicle.objects.create(
+        driver=driver,
+        make=serializer.validated_data['make'],
+        model=serializer.validated_data['vehicle_model'],
+        year=serializer.validated_data['year'],
+        color=serializer.validated_data['color'],
+        plate_number=serializer.validated_data['plate_number'],
+        vehicle_type=serializer.validated_data.get('vehicle_type', 'sedan'),
+    )
+    
+    # Create user Wallet (will be funded upon admin approval)
+    from accounts.models import Wallet
+    Wallet.objects.get_or_create(user=user)
+    
+    return Response(
+        {'detail': 'Muvaffaqiyatli ro\'yxatdan o\'tdingiz. Tez orada admin tasdiqlaydi.'},
         status=status.HTTP_201_CREATED
     )
 
