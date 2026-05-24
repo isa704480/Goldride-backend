@@ -103,9 +103,51 @@ def verify_otp_view(request):
     email = request.data.get('email')
     tg_username = request.data.get('telegram_username')
     otp = request.data.get('otp')
-    
+    tg_login = request.data.get('tg_login', False)
+
+    # --- TELEGRAM 6-digit OTP flow ---
+    if tg_login and phone and otp:
+        from django.core.cache import cache as django_cache
+        if not phone.startswith('+'): phone = '+' + phone
+        stored_otp = django_cache.get(f'tg_otp:{phone}')
+        if not stored_otp or stored_otp != str(otp):
+            return Response({'detail': 'Kod noto\'g\'ri yoki muddati o\'tgan.'}, status=400)
+
+        chat_id = django_cache.get(f'tg_chat:{phone}')
+        django_cache.delete(f'tg_otp:{phone}')
+        django_cache.delete(f'tg_chat:{phone}')
+
+        user = User.objects.filter(phone=phone).first()
+        device_id = request.data.get('device_id')
+        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        ip = x_forwarded_for.split(',')[0] if x_forwarded_for else request.META.get('REMOTE_ADDR')
+
+        if user:
+            if chat_id:
+                user.telegram_chat_id = chat_id
+            user.device_id = device_id
+            user.last_ip = ip
+            user.save(update_fields=['telegram_chat_id', 'device_id', 'last_ip'])
+            if user.is_blocked:
+                return Response({'detail': 'Sizning akkauntingiz bloklangan.'}, status=403)
+            refresh = RefreshToken.for_user(user)
+            return Response({
+                'status': 'ok',
+                'access': str(refresh.access_token),
+                'refresh': str(refresh),
+                'user': UserProfileSerializer(user).data,
+            })
+
+        # New user via Telegram — ask for name
+        return Response({
+            'detail': 'Profilni yakunlash kerak.',
+            'status': 'partial',
+            'missing_fields': ['first_name', 'last_name'],
+            'prefill': {'phone': phone}
+        }, status=200)
+
     identifier = email if email else (phone or tg_username)
-    
+
     if not identifier or not otp:
         return Response({'detail': 'Ma\'lumotlar yetarli emas.'}, status=400)
 
