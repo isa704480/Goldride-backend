@@ -127,11 +127,12 @@ def request_ride(request):
     )
     
     stops_data = data.get('stops', [])
+    share_type = data.get('share_type', 'solo')
     price = calculate_price(
         distance, 
         category=data.get('car_category', 'economy'),
-        share_type=data.get('share_type', 'solo'),
-        passengers_count=2 if data.get('share_type') == 'shared_1' else (3 if data.get('share_type') == 'shared_2' else 1),
+        share_type=share_type,
+        partners_found=(share_type != 'solo'),
         stops_count=len(stops_data),
         is_scheduled=data.get('is_scheduled', False)
     )
