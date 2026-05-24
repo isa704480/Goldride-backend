@@ -14,7 +14,7 @@ def notify_ride_status_update(ride_id, status_text):
     from channels.layers import get_channel_layer
     from .models import Ride
     from accounts.utils import send_telegram_notification
-    
+
     channel_layer = get_channel_layer()
     if channel_layer:
         # 1. Notify Ride Group (Driver & Passengers)
@@ -27,7 +27,23 @@ def notify_ride_status_update(ride_id, status_text):
             }
         )
 
-        # 2. Notify Admin Group (Dashboard)
+        # 2. When driver accepted, also send ride_accepted with full driver info
+        if status_text == 'driver_found':
+            try:
+                ride = Ride.objects.get(id=ride_id)
+                from .serializers import RideSerializer
+                ride_data = RideSerializer(ride).data
+                async_to_sync(channel_layer.group_send)(
+                    f'ride_{ride_id}',
+                    {
+                        'type': 'ride_accepted',
+                        'ride': dict(ride_data),
+                    }
+                )
+            except Exception as e:
+                print(f"ride_accepted event error: {e}")
+
+        # 3. Notify Admin Group (Dashboard)
         async_to_sync(channel_layer.group_send)(
             'admin_group',
             {
@@ -38,7 +54,7 @@ def notify_ride_status_update(ride_id, status_text):
             }
         )
 
-    # 3. Telegram Notifications for Passengers
+    # 4. Telegram Notifications for Passengers
     if status_text == 'driver_found':
         try:
             ride = Ride.objects.get(id=ride_id)
