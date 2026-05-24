@@ -386,6 +386,82 @@ def mark_arrived(request, ride_id):
     return Response(RideSerializer(ride).data)
 
 
+def _finalize_ride(ride, driver):
+    """Shared completion logic for complete_ride and dropoff_passenger."""
+    from django.conf import settings as conf_settings
+    from pricing.engine import recalculate_ride_fares, calculate_commission
+    from accounts.models import Wallet
+
+    ride.status = 'completed'
+    ride.completed_at = timezone.now()
+
+    now_local = timezone.localtime(timezone.now())
+    current_time_str = now_local.strftime('%H:%M')
+    for hh in conf_settings.HAPPY_HOURS:
+        if hh['start'] <= current_time_str < hh['end']:
+            ride.commission_rate = hh['commission_rate']
+            break
+
+    total = recalculate_ride_fares(ride)
+    is_shared = ride.passengers.count() > 1
+    ride.commission_amount = calculate_commission(total, is_shared=is_shared)
+    ride.driver_earnings = total - ride.commission_amount
+    ride.save()
+
+    driver_wallet, _ = Wallet.objects.get_or_create(user=driver.user)
+    driver_wallet.deposit(ride.driver_earnings)
+
+    for passenger in ride.passengers.all():
+        pass_wallet, _ = Wallet.objects.get_or_create(user=passenger.user)
+        user = passenger.user
+        fare = passenger.fare
+        bonus_usage = Decimal('0')
+        req = passenger.ride_request
+
+        if req and req.use_bonus and user.bonus_balance > 0:
+            max_bonus_allowed = fare * Decimal('0.7')
+            bonus_intent_factor = Decimal(str(req.bonus_percent)) / Decimal('100')
+            target_bonus = max_bonus_allowed * bonus_intent_factor
+            bonus_usage = min(user.bonus_balance, target_bonus)
+            user.bonus_balance -= bonus_usage
+            user.save(update_fields=['bonus_balance'])
+
+        remaining_fare = fare - bonus_usage
+        if remaining_fare > 0:
+            pass_wallet.withdraw(remaining_fare, description=f"Safar to'lovi #{ride.id} (Bonus: {bonus_usage})")
+
+        points = int(passenger.fare / 1000)
+        if points > 0:
+            passenger.user.add_gold_points(points)
+
+        if passenger.user.referred_by:
+            inviter = passenger.user.referred_by
+            passenger.user.referral_rides_count += 1
+            passenger.user.save(update_fields=['referral_rides_count'])
+            bonus_amount = Decimal('0')
+            if passenger.user.referral_rides_count <= 10:
+                bonus_amount = passenger.fare * Decimal('0.05')
+            else:
+                bonus_amount = passenger.fare * Decimal('0.01')
+            if passenger.user.referral_rides_count == 20:
+                bonus_amount += Decimal('30000')
+            if bonus_amount > 0:
+                inviter_wallet, _ = Wallet.objects.get_or_create(user=inviter)
+                inviter_wallet.deposit(
+                    bonus_amount,
+                    description=f"Referal bonus: {passenger.user.phone} ({passenger.user.referral_rides_count}-safar)"
+                )
+
+    driver.commission_paid += ride.commission_amount
+    driver.total_earnings += ride.total_price
+    driver.total_rides += 1
+    driver.save()
+
+    ride.passengers.filter(dropped_off=False).update(dropped_off=True, dropped_off_at=timezone.now())
+    ride.requests.filter(status__in=['accepted', 'arrived', 'started']).update(status='completed')
+    notify_ride_status_update(ride.id, 'completed')
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def complete_ride(request, ride_id):
@@ -394,121 +470,12 @@ def complete_ride(request, ride_id):
         ride = Ride.objects.get(id=ride_id)
         driver = request.user.driver_profile
     except (Ride.DoesNotExist, Exception):
-        return Response(
-            {'detail': 'Safar topilmadi.'},
-            status=status.HTTP_404_NOT_FOUND
-        )
+        return Response({'detail': 'Safar topilmadi.'}, status=status.HTTP_404_NOT_FOUND)
 
     if ride.driver != driver:
-        return Response(
-            {'detail': 'Bu safar sizga tayinlanmagan.'},
-            status=status.HTTP_403_FORBIDDEN
-        )
+        return Response({'detail': 'Bu safar sizga tayinlanmagan.'}, status=status.HTTP_403_FORBIDDEN)
 
-    # Calculate final amounts
-    ride.status = 'completed'
-    ride.completed_at = timezone.now()
-
-    # === Happy Hours: Kam komissiya tekshiruvi ===
-    from django.conf import settings as conf_settings
-    from datetime import datetime
-    now_local = timezone.localtime(timezone.now())
-    current_time_str = now_local.strftime('%H:%M')
-    
-    happy_hour_active = False
-    for hh in conf_settings.HAPPY_HOURS:
-        if hh['start'] <= current_time_str < hh['end']:
-            ride.commission_rate = hh['commission_rate']
-            happy_hour_active = True
-            break
-
-    # Sum all passenger fares (Recalculate first for shared logic)
-    from pricing.engine import recalculate_ride_fares, calculate_commission
-    total = recalculate_ride_fares(ride)
-    
-    is_shared = ride.passengers.count() > 1
-    ride.commission_amount = calculate_commission(total, is_shared=is_shared)
-    ride.driver_earnings = total - ride.commission_amount
-    ride.save()
-
-    # Financial Settlement: Wallet Transfers
-    from accounts.models import Wallet
-    driver_wallet, _ = Wallet.objects.get_or_create(user=driver.user)
-    driver_wallet.deposit(ride.driver_earnings)
-
-    # Award points and handle payments for passengers
-    for passenger in ride.passengers.all():
-        # 1. Deduct from passenger wallet (handle bonus usage)
-        pass_wallet, _ = Wallet.objects.get_or_create(user=passenger.user)
-        user = passenger.user
-        
-        fare = passenger.fare
-        bonus_usage = Decimal('0')
-        req = passenger.ride_request
-        
-        # Use bonus if requested and available (max 70% of fare)
-        if req and req.use_bonus and user.bonus_balance > 0:
-            max_bonus_allowed = fare * Decimal('0.7')
-            # Use user-selected percentage of the max allowed bonus
-            bonus_intent_factor = Decimal(str(req.bonus_percent)) / Decimal('100')
-            target_bonus = max_bonus_allowed * bonus_intent_factor
-            
-            bonus_usage = min(user.bonus_balance, target_bonus)
-            user.bonus_balance -= bonus_usage
-            user.save(update_fields=['bonus_balance'])
-            
-        remaining_fare = fare - bonus_usage
-        if remaining_fare > 0:
-            pass_wallet.withdraw(remaining_fare, description=f"Safar to'lovi #{ride.id} (Bonus: {bonus_usage})")
-        
-        # Also mark as paid in ride passenger record if needed
-        # (Assuming withdraw handles the transaction logging)
-
-        # 2. Points (1 point per 1000 UZS)
-        points = int(passenger.fare / 1000)
-        if points > 0:
-            passenger.user.add_gold_points(points)
-
-        # 3. Referral Bonus Logic
-        if passenger.user.referred_by:
-            inviter = passenger.user.referred_by
-            passenger.user.referral_rides_count += 1
-            passenger.user.save(update_fields=['referral_rides_count'])
-            
-            from decimal import Decimal
-            bonus_amount = 0
-            # 1-10 rides: 5%
-            if passenger.user.referral_rides_count <= 10:
-                bonus_amount = passenger.fare * Decimal('0.05')
-            else:
-                # 11+ rides: 1%
-                bonus_amount = passenger.fare * Decimal('0.01')
-                
-            # 20th ride: 30,000 UZS lump sum
-            if passenger.user.referral_rides_count == 20:
-                bonus_amount += Decimal('30000')
-                
-            if bonus_amount > 0:
-                inviter_wallet, _ = Wallet.objects.get_or_create(user=inviter)
-                inviter_wallet.deposit(
-                    bonus_amount, 
-                    description=f"Referal bonus: {passenger.user.phone} ({passenger.user.referral_rides_count}-safar)"
-                )
-
-        pass
-
-    # Update driver stats
-    driver.commission_paid += ride.commission_amount
-    driver.total_earnings += ride.total_price
-    driver.total_rides += 1
-    driver.save()
-
-    # Mark all passengers as completed
-    ride.passengers.filter(dropped_off=False).update(dropped_off=True, dropped_off_at=timezone.now())
-    ride.requests.filter(status__in=['accepted', 'arrived', 'started']).update(status='completed')
-
-    notify_ride_status_update(ride.id, 'completed')
-
+    _finalize_ride(ride, driver)
     return Response(RideSerializer(ride).data)
 
 
@@ -570,14 +537,18 @@ def dropoff_passenger(request, ride_id, passenger_id):
     passenger.dropped_off_at = timezone.now()
     passenger.save()
 
-    # If all passengers dropped off, complete the ride
     ride = passenger.ride
-    if not ride.passengers.filter(dropped_off=False).exists():
-        return complete_ride(request, ride_id)
-    
-    # Notify that one passenger was dropped off
-    notify_ride_status_update(ride.id, 'passenger_dropped_off')
 
+    # If all passengers dropped off, complete the ride
+    if not ride.passengers.filter(dropped_off=False).exists():
+        try:
+            driver = request.user.driver_profile
+        except Exception:
+            return Response({'detail': 'Haydovchi profili topilmadi.'}, status=status.HTTP_403_FORBIDDEN)
+        _finalize_ride(ride, driver)
+        return Response(RideSerializer(ride).data)
+
+    notify_ride_status_update(ride.id, 'passenger_dropped_off')
     return Response({'status': 'ok', 'dropped_off': True})
 
 
