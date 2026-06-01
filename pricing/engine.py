@@ -1,7 +1,17 @@
+import logging
 from math import radians, cos, sin, asin, sqrt
 from django.conf import settings
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from .models import PricingRule
+
+logger = logging.getLogger('pricing')
+
+# Toshkent shahri uchun yo'l masofasi koeffitsienti.
+# Haversine (qush uchishi) masofasidan yo'ldagi masofa taxminan 35% ko'p.
+TASHKENT_ROAD_FACTOR = 1.35
+
+# Toshkentda o'rtacha harakatlanish tezligi (km/h) — ETA hisoblash uchun
+AVG_SPEED_KMH = 28.0
 
 
 def haversine(lat1, lng1, lat2, lng2):
@@ -11,15 +21,23 @@ def haversine(lat1, lng1, lat2, lng2):
     dlng = lng2 - lng1
     a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlng / 2) ** 2
     c = 2 * asin(sqrt(a))
-    r = 6371  # Earth radius in km
+    r = 6371
     return c * r
 
 
 def calculate_distance(pickup_lat, pickup_lng, drop_lat, drop_lng):
-    """Calculate estimated road distance (haversine * 1.3 correction factor)."""
+    """
+    Haqiqiy yo'l masofasini hisoblash.
+    Toshkent uchun Haversine * 1.35 koeffitsienti ishlatiladi,
+    chunki shahar ko'chalari qushning uchish yo'lidan ~35% uzunroq.
+    """
     straight_line = haversine(pickup_lat, pickup_lng, drop_lat, drop_lng)
-    # Road distance is typically ~1.3x straight line
-    return round(straight_line * 1.3, 2)
+    return round(straight_line * TASHKENT_ROAD_FACTOR, 2)
+
+
+def estimate_duration_minutes(distance_km):
+    """Masofa bo'yicha taxminiy vaqtni (daqiqa) hisoblash."""
+    return round((distance_km / AVG_SPEED_KMH) * 60, 1)
 
 
 def get_active_pricing():
@@ -56,48 +74,64 @@ def get_active_pricing():
     }
 
 
-def calculate_price(distance_km, category='economy', share_type='solo', partners_found=False, shared_distance_ratio=1.0, stops_count=0, is_scheduled=False):
+def calculate_price(
+    distance_km,
+    category='economy',
+    share_type='solo',
+    partners_found=False,
+    shared_distance_ratio=1.0,
+    stops_count=0,
+    is_scheduled=False,
+):
     """
-    Calculate ride price with dynamic sharing logic.
-    - partners_found: If True, apply discount. If False, charge full price even if requested shared.
-    - shared_distance_ratio: If < 0.5, apply only half of the discount.
-    """
-    distance_km = max(0, float(distance_km or 0))
+    Safar narxini hisoblash.
 
-    # 1. Base Rates based on Category
+    distance_km        — haqiqiy yo'l masofasi (calculate_distance() natijasi)
+    partners_found     — True bo'lsa chegirma qo'llanadi
+    shared_distance_ratio — 0.5 dan kam bo'lsa, chegirma yarmi qo'llanadi
+    stops_count        — qo'shimcha to'xtashlar soni
+    is_scheduled       — oldindan buyurtma bo'lsa qo'shimcha to'lov
+    """
+    distance_km = max(0.0, float(distance_km or 0))
+
+    # Har bir avtomobil klassi uchun tariflar (UZS)
     rates = {
-        'economy': {'base': 6000, 'km': 1500, 'disc_1': 0.15, 'disc_2': 0.30},
-        'comfort': {'base': 7000, 'km': 2000, 'disc_1': 0.15, 'disc_2': 0.30},
-        'electro': {'base': 7500, 'km': 2300, 'disc_1': 0.20, 'disc_2': 0.40},
-        'business': {'base': 10000, 'km': 2800, 'disc_1': 0.20, 'disc_2': 0.40},
+        'economy':  {'base': 6000, 'km': 1500, 'per_min': 200, 'disc_1': 0.15, 'disc_2': 0.30},
+        'comfort':  {'base': 7000, 'km': 2000, 'per_min': 250, 'disc_1': 0.15, 'disc_2': 0.30},
+        'electro':  {'base': 7500, 'km': 2300, 'per_min': 280, 'disc_1': 0.20, 'disc_2': 0.40},
+        'business': {'base': 10000,'km': 2800, 'per_min': 350, 'disc_1': 0.20, 'disc_2': 0.40},
     }
-    
     r = rates.get(category) or rates['economy']
-    
-    # 2. Base calculation
-    price = r['base'] + (distance_km * r['km'])
-    
-    # 3. Sharing Logic
+
+    # 1. Asosiy narx = bazaviy + masofa + vaqt
+    duration_min = estimate_duration_minutes(distance_km)
+    price = r['base'] + (distance_km * r['km']) + (duration_min * r['per_min'])
+
+    # 2. Hamrohlik chegirmasi
     if share_type != 'solo' and partners_found:
         discount = r['disc_1'] if share_type == 'shared_1' else r['disc_2']
-        
-        # If shared less than 50% of the distance, give only half bonus/discount
         if shared_distance_ratio < 0.5:
-            discount = discount / 2
-            
+            discount /= 2
         price *= (1 - discount)
 
-    # 4. Add stops fee (2000 per stop)
-    price += (max(0, int(stops_count)) * 2000)
+    # 3. To'xtash haqi: har bir qo'shimcha to'xtash uchun 2000 UZS
+    price += max(0, int(stops_count)) * 2000
 
-    # 5. Add scheduled fee
+    # 4. Oldindan buyurtma qo'shimchasi
     if is_scheduled:
         price += 5000
 
-    # Ensure minimum fare (base fare)
+    # Minimal narx: avtomobil klassi bazaviy tariflari
     price = max(price, r['base'])
 
-    return int(round(price / 100) * 100)
+    # 500 UZS ga yaxlitlash (foydalanuvchiga qulay)
+    price = round(price / 500) * 500
+
+    logger.debug(
+        "Narx hisoblandi: %.1f km, %s klass, %d UZS",
+        distance_km, category, price
+    )
+    return int(price)
 
 
 def recalculate_ride_fares(ride):
@@ -172,13 +206,16 @@ def recalculate_ride_fares(ride):
 
 
 def calculate_commission(total_price, is_shared=False):
-    """Calculate commission. If shared, use a lower commission rate as incentive."""
+    """
+    Komissiya hisoblash. Floating point xatoliklaridan himoya uchun Decimal ishlatiladi.
+    Hamrohlik safarlarida komissiya 2% past — haydovchi uchun rag'bat.
+    """
     pricing = get_active_pricing()
-    rate = pricing['commission_rate']
-    
+    rate = Decimal(str(pricing['commission_rate']))
+
     if is_shared:
-        # 2% lower commission for shared rides
-        rate = max(0.01, rate - 0.02)
-        
-    commission = total_price * Decimal(str(rate))
-    return round(commission, 2)
+        rate = max(Decimal('0.01'), rate - Decimal('0.02'))
+
+    price_dec = Decimal(str(total_price))
+    commission = (price_dec * rate).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
+    return int(commission)

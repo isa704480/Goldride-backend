@@ -254,10 +254,17 @@ class Driver(models.Model):
         verbose_name='Status'
     )
     is_online = models.BooleanField(default=False, verbose_name='Onlayn')
+    is_being_requested = models.BooleanField(
+        default=False,
+        verbose_name='So\'rov kutilmoqda',
+        help_text='True bo\'lsa, haydovchi hozir yangi so\'rov kutmoqda — boshqa so\'rov yuborilmaydi.'
+    )
     current_lat = models.FloatField(null=True, blank=True, verbose_name='Kenglik')
     current_lng = models.FloatField(null=True, blank=True, verbose_name='Uzunlik')
     rating = models.FloatField(default=5.0, verbose_name='Reyting')
     total_rides = models.IntegerField(default=0, verbose_name='Jami safarlar')
+    total_rides_completed = models.IntegerField(default=0, verbose_name='Tugatilgan safarlar')
+    total_requests_received = models.IntegerField(default=0, verbose_name='Qabul qilingan so\'rovlar')
     total_earnings = models.DecimalField(
         max_digits=12,
         decimal_places=2,

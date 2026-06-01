@@ -1,3 +1,4 @@
+import logging
 from rest_framework import status, generics, permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -6,7 +7,7 @@ from decimal import Decimal
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
 from .models import Driver, SavedLocation, User
-from .otp import send_otp, verify_otp, get_otp_ttl
+from .otp import send_otp, verify_otp, get_otp_ttl, can_send_otp
 from .serializers import (
     SendOTPSerializer,
     VerifyOTPSerializer,
@@ -23,6 +24,7 @@ from .serializers import (
 from .utils import send_telegram_notification
 from django.conf import settings
 
+logger = logging.getLogger('accounts')
 User = get_user_model()
 
 
@@ -36,16 +38,13 @@ def send_otp_view(request):
     if not phone and not email:
         return Response({'detail': 'Telefon raqami yoki email kiritish shart.'}, status=400)
 
-    # Use email for OTP delivery if provided, but phone for identification
     identifier = email if email else phone
 
-    # Check rate limiting
-    ttl = get_otp_ttl(identifier)
-    if ttl > 240:
-        return Response(
-            {'detail': f'{ttl - 240} soniyadan keyin qayta urinib ko\'ring.'},
-            status=status.HTTP_429_TOO_MANY_REQUESTS
-        )
+    # Brute-force va rate-limit tekshiruvi
+    allowed, reason = can_send_otp(identifier)
+    if not allowed:
+        logger.warning("OTP yuborishda rad etildi: %s — %s", identifier, reason)
+        return Response({'detail': reason}, status=status.HTTP_429_TOO_MANY_REQUESTS)
 
     # Generate and store OTP
     from .otp import generate_otp, store_otp
@@ -269,7 +268,7 @@ def admin_login_view(request):
     if not phone or not password:
         return Response({'error': 'Telefon va parolni kiriting'}, status=status.HTTP_400_BAD_REQUEST)
 
-    print(f"Login attempt: {phone}") # Debug
+    logger.info("Admin login urinishi: %s", phone)
     
     from django.db.models import Q
     from django.contrib.auth import authenticate

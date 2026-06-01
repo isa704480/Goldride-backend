@@ -1,4 +1,5 @@
 import os
+import logging
 from pathlib import Path
 from datetime import timedelta
 from decouple import config
@@ -220,8 +221,17 @@ SIMPLE_JWT = {
 # Railway HTTPS fix
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
-# CORS
-CORS_ALLOW_ALL_ORIGINS = True 
+# CORS — production'da faqat ruxsat berilgan domenlar
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
+else:
+    CORS_ALLOW_ALL_ORIGINS = False
+    CORS_ALLOWED_ORIGINS = [
+        'https://goldride-admin.vercel.app',
+        'https://goldride-reklama.vercel.app',
+        'http://localhost:8081',
+        'http://localhost:3000',
+    ]
 CORS_ALLOW_CREDENTIALS = False
 
 # OTP Settings
@@ -299,4 +309,65 @@ TASHKENT_BOUNDARY = {
     'LAT_MAX': 41.45,
     'LNG_MIN': 69.05,
     'LNG_MAX': 69.50,
+}
+
+# OTP brute-force himoya sozlamalari
+OTP_SECURITY = {
+    'MAX_VERIFY_ATTEMPTS': 5,       # Maksimal noto'g'ri urinishlar soni
+    'BLOCK_DURATION_SECONDS': 900,  # Bloklash muddati: 15 daqiqa
+    'RESEND_COOLDOWN_SECONDS': 60,  # Qayta yuborish orasidagi minimal vaqt
+    'MAX_SENDS_PER_HOUR': 5,        # Bir soatda maksimal yuborish soni
+}
+
+# Logging sozlamalari
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '[{levelname}] {asctime} {module} {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '[{levelname}] {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+        'matching': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'rides': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'accounts': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'pricing': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
 }
