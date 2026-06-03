@@ -249,7 +249,10 @@ ESKIZ_TOKEN_CACHE_KEY = 'eskiz_token'
 
 # Telegram OTP
 TELEGRAM_BOT_TOKEN = config('TELEGRAM_BOT_TOKEN', default='')
-TELEGRAM_ADMIN_CHAT_ID = config('TELEGRAM_ADMIN_CHAT_ID', default='') # Chat where OTPs will be sent in 'telegram' mode
+TELEGRAM_ADMIN_CHAT_ID = config('TELEGRAM_ADMIN_CHAT_ID', default='')
+# Webhook URL: Railway deployment manzili (masalan: https://goldride-backend-production.up.railway.app)
+# Bot polling EMAS, webhook ishlatiladi — bir nechta instance muammosi yo'q
+TELEGRAM_WEBHOOK_BASE_URL = config('TELEGRAM_WEBHOOK_BASE_URL', default='')
 
 # Email OTP (Gmail/SMTP)
 OTP_EMAIL_RECIPIENT = config('OTP_EMAIL_RECIPIENT', default='admin@goldride.uz')

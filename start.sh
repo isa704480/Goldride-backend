@@ -27,8 +27,31 @@ else:
     print('Superuser already exists')
 " 2>&1 || echo "Superuser check skipped"
 
-echo "Starting Telegram Bot in background..."
-python manage.py run_bot &
+echo "Registering Telegram webhook (polling o'rniga)..."
+python manage.py shell -c "
+import requests, os
+from django.conf import settings
+
+token = settings.TELEGRAM_BOT_TOKEN
+base_url = settings.TELEGRAM_WEBHOOK_BASE_URL or os.environ.get('RAILWAY_PUBLIC_DOMAIN', '')
+if not base_url.startswith('http'):
+    base_url = 'https://' + base_url if base_url else ''
+
+if token and base_url:
+    webhook_url = base_url.rstrip('/') + '/api/accounts/telegram/webhook/'
+    r = requests.post(
+        f'https://api.telegram.org/bot{token}/setWebhook',
+        json={'url': webhook_url, 'allowed_updates': ['message']},
+        timeout=10
+    )
+    resp = r.json()
+    if resp.get('ok'):
+        print(f'Webhook royhattan otdi: {webhook_url}')
+    else:
+        print(f'Webhook xatosi: {resp}')
+else:
+    print('TELEGRAM_BOT_TOKEN yoki TELEGRAM_WEBHOOK_BASE_URL yoq — webhook otkizildi')
+" 2>&1 || echo "Webhook setup skipped"
 
 echo "Starting Daphne server on port ${PORT:-8000}..."
 exec daphne -b 0.0.0.0 -p ${PORT:-8000} config.asgi:application
