@@ -6,6 +6,8 @@ from rest_framework.response import Response
 from decimal import Decimal
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
+from drf_yasg.utils import swagger_auto_schema
+from drf_yasg import openapi
 from .models import Driver, SavedLocation, User
 from .otp import send_otp, verify_otp, get_otp_ttl, can_send_otp
 from .serializers import (
@@ -28,10 +30,30 @@ logger = logging.getLogger('accounts')
 User = get_user_model()
 
 
+@swagger_auto_schema(
+    method='post',
+    tags=['Auth'],
+    operation_summary='OTP yuborish',
+    operation_description='Telefon raqam yoki emailga OTP kodi yuboradi.',
+    request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        properties={
+            'phone': openapi.Schema(type=openapi.TYPE_STRING, example='+998901234567'),
+            'email': openapi.Schema(type=openapi.TYPE_STRING, example='user@example.com'),
+        },
+    ),
+    responses={
+        200: openapi.Response('OTP yuborildi', openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={'detail': openapi.Schema(type=openapi.TYPE_STRING)},
+        )),
+        429: 'Juda ko\'p urinish',
+    }
+)
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def send_otp_view(request):
-    """Send OTP to phone number or email."""
+    """OTP yuborish — telefon yoki email."""
     phone = request.data.get('phone')
     email = request.data.get('email')
 
@@ -89,6 +111,38 @@ def is_name_weird(name):
         return True
     return False
 
+@swagger_auto_schema(
+    method='post',
+    tags=['Auth'],
+    operation_summary='OTP tasdiqlash → JWT token',
+    operation_description=(
+        'OTP kodni tasdiqlaydi. Agar foydalanuvchi yangi bo\'lsa `status: partial` qaytaradi '
+        '(qo\'shimcha ma\'lumot kerak). Muvaffaqiyatli bo\'lsa `access` va `refresh` token qaytaradi.'
+    ),
+    request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        required=['otp'],
+        properties={
+            'phone':      openapi.Schema(type=openapi.TYPE_STRING, example='+998901234567'),
+            'email':      openapi.Schema(type=openapi.TYPE_STRING, example='user@example.com'),
+            'otp':        openapi.Schema(type=openapi.TYPE_STRING, example='1234'),
+            'first_name': openapi.Schema(type=openapi.TYPE_STRING, example='Ali'),
+            'last_name':  openapi.Schema(type=openapi.TYPE_STRING, example='Valiyev'),
+            'tg_login':   openapi.Schema(type=openapi.TYPE_BOOLEAN, description='Telegram orqali kirish'),
+        },
+    ),
+    responses={
+        200: openapi.Response('Kirish muvaffaqiyatli', openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'access':  openapi.Schema(type=openapi.TYPE_STRING),
+                'refresh': openapi.Schema(type=openapi.TYPE_STRING),
+                'status':  openapi.Schema(type=openapi.TYPE_STRING, example='ok'),
+            },
+        )),
+        400: 'Noto\'g\'ri kod',
+    }
+)
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def verify_otp_view(request):
@@ -259,10 +313,24 @@ def verify_otp_view(request):
     })
 
 
+@swagger_auto_schema(
+    method='post',
+    tags=['Auth'],
+    operation_summary='Admin login (phone + parol)',
+    request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        required=['phone', 'password'],
+        properties={
+            'phone':    openapi.Schema(type=openapi.TYPE_STRING, example='+998901234567'),
+            'password': openapi.Schema(type=openapi.TYPE_STRING, example='••••••••'),
+        },
+    ),
+    responses={200: 'JWT token', 401: 'Noto\'g\'ri ma\'lumotlar'}
+)
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def admin_login_view(request):
-    """Secure login for admin panel using phone + password."""
+    """Admin panel uchun phone + parol bilan kirish."""
     phone = request.data.get('phone')
     password = request.data.get('password')
 

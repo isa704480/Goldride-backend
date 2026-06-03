@@ -375,3 +375,33 @@ LOGGING = {
         },
     },
 }
+
+# Swagger / drf_yasg sozlamalari
+SWAGGER_SETTINGS = {
+    'SECURITY_DEFINITIONS': {
+        'Bearer': {
+            'type': 'apiKey',
+            'name': 'Authorization',
+            'in': 'header',
+            'description': 'JWT token: **Bearer &lt;token&gt;**',
+        }
+    },
+    'USE_SESSION_AUTH': False,
+    'JSON_EDITOR': True,
+    'SUPPORTED_SUBMIT_METHODS': ['get', 'post', 'put', 'patch', 'delete'],
+    'OPERATIONS_SORTER': 'alpha',
+    'TAGS_SORTER': 'alpha',
+    'DOC_EXPANSION': 'none',   # Hammasi yopiq holda ochiladi
+    'DEFAULT_MODEL_RENDERING': 'example',
+    'DEEP_LINKING': True,
+    'SHOW_EXTENSIONS': False,
+    'SHOW_COMMON_EXTENSIONS': False,
+    'PERSIST_AUTH': True,      # Token kiritilgandan keyin saqlanib qoladi
+}
+
+REDOC_SETTINGS = {
+    'LAZY_RENDERING': True,
+    'HIDE_HOSTNAME': False,
+    'EXPAND_RESPONSES': 'none',
+    'PATH_IN_MIDDLE': False,
+}
