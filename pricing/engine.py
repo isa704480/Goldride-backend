@@ -74,6 +74,55 @@ def get_active_pricing():
     }
 
 
+def get_surge_multiplier():
+    """
+    Hozirgi talab/taklif nisbatiga qarab surge koeffitsientini hisoblash.
+
+    demand_ratio = faol so'rovlar / onlayn haydovchilar
+
+    > 2.0  → narx 1.5 barobar (juda ko'p yo'lovchi, kam mashina)
+    > 1.5  → narx 1.25 barobar (talab biroz oshib turgan)
+    ≤ 1.5  → oddiy narx (1.0)
+
+    Cache ishlatiladi (30 soniya) — har so'rovda DB ga urilmaslik uchun.
+    """
+    from django.core.cache import cache
+    cached = cache.get('surge_multiplier')
+    if cached is not None:
+        return cached
+
+    try:
+        from rides.models import RideRequest
+        from accounts.models import Driver
+
+        active_requests = RideRequest.objects.filter(status='searching').count()
+        available_drivers = Driver.objects.filter(
+            is_online=True, status='approved', is_being_requested=False
+        ).count()
+
+        if available_drivers == 0:
+            multiplier = 1.5
+        else:
+            ratio = active_requests / available_drivers
+            if ratio > 2.0:
+                multiplier = 1.5
+            elif ratio > 1.5:
+                multiplier = 1.25
+            else:
+                multiplier = 1.0
+
+        logger.info(
+            "Surge: so'rovlar=%d, haydovchilar=%d → %.2fx",
+            active_requests, available_drivers, multiplier
+        )
+    except Exception as e:
+        logger.warning("Surge hisoblashda xatolik: %s", e)
+        multiplier = 1.0
+
+    cache.set('surge_multiplier', multiplier, 30)
+    return multiplier
+
+
 def calculate_price(
     distance_km,
     category='economy',
@@ -82,6 +131,7 @@ def calculate_price(
     shared_distance_ratio=1.0,
     stops_count=0,
     is_scheduled=False,
+    apply_surge=False,
 ):
     """
     Safar narxini hisoblash.
@@ -91,6 +141,7 @@ def calculate_price(
     shared_distance_ratio — 0.5 dan kam bo'lsa, chegirma yarmi qo'llanadi
     stops_count        — qo'shimcha to'xtashlar soni
     is_scheduled       — oldindan buyurtma bo'lsa qo'shimcha to'lov
+    apply_surge        — True bo'lsa talab/taklif surge qo'llanadi
     """
     distance_km = max(0.0, float(distance_km or 0))
 
@@ -121,16 +172,19 @@ def calculate_price(
     if is_scheduled:
         price += 5000
 
+    # 5. Surge: talab ko'p, haydovchi kam bo'lsa narx oshadi
+    surge = get_surge_multiplier() if apply_surge else 1.0
+    if surge > 1.0:
+        price *= surge
+        logger.info("Surge %.2fx qo'llandi: %d UZS → %d UZS", surge, int(price / surge), int(price))
+
     # Minimal narx: avtomobil klassi bazaviy tariflari
     price = max(price, r['base'])
 
     # 500 UZS ga yaxlitlash (foydalanuvchiga qulay)
     price = round(price / 500) * 500
 
-    logger.debug(
-        "Narx hisoblandi: %.1f km, %s klass, %d UZS",
-        distance_km, category, price
-    )
+    logger.debug("Narx hisoblandi: %.1f km, %s klass, surge=%.2f → %d UZS", distance_km, category, surge, price)
     return int(price)
 
 

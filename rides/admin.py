@@ -1,5 +1,20 @@
 from django.contrib import admin
-from .models import Ride, RideRequest, RidePassenger, RideRating
+from .models import Ride, RideRequest, RidePassenger, RideRating, ServiceZone
+
+
+@admin.register(ServiceZone)
+class ServiceZoneAdmin(admin.ModelAdmin):
+    list_display = ('name', 'is_active', 'lat_min', 'lat_max', 'lng_min', 'lng_max', 'updated_at')
+    list_editable = ('is_active',)
+    list_filter = ('is_active',)
+    search_fields = ('name',)
+    fieldsets = (
+        (None, {'fields': ('name', 'is_active')}),
+        ("Chegaralar (to'rtburchak)", {
+            'fields': (('lat_min', 'lat_max'), ('lng_min', 'lng_max')),
+            'description': "Shimol: ~41.45, Janub: ~41.15, G'arb: ~69.05, Sharq: ~69.50",
+        }),
+    )
 
 
 class RidePassengerInline(admin.TabularInline):

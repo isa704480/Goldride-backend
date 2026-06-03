@@ -1,11 +1,23 @@
+import logging
 from django.conf import settings
+
+logger = logging.getLogger('rides')
+
 
 def is_in_tashkent(lat, lng):
     """
-    Checks if the given coordinates are within the Tashkent boundary.
-    For easy testing and development anywhere, this always returns True.
+    Koordinata faol xizmat hududi (ServiceZone) ichida ekanligini tekshirish.
+    DB da zona bo'lmasa — settings.py dagi TASHKENT_BOUNDARY ga qaytadi.
     """
-    return True
+    try:
+        from .models import ServiceZone
+        result = ServiceZone.is_within_service_area(lat, lng)
+        if not result:
+            logger.warning("Koordinata xizmat hududidan tashqarida: lat=%.4f, lng=%.4f", lat, lng)
+        return result
+    except Exception as e:
+        logger.error("Geofencing tekshirishda xatolik: %s", e)
+        return True
 
 
 def notify_ride_status_update(ride_id, status_text):
@@ -41,7 +53,7 @@ def notify_ride_status_update(ride_id, status_text):
                     }
                 )
             except Exception as e:
-                print(f"ride_accepted event error: {e}")
+                logger.error("ride_accepted event xatoligi: %s", e)
 
         # 3. Notify Admin Group (Dashboard)
         async_to_sync(channel_layer.group_send)(
@@ -78,5 +90,5 @@ def notify_ride_status_update(ride_id, status_text):
                         from accounts.utils import send_telegram_notification
                         send_telegram_notification(msg, chat_id=user.telegram_chat_id)
         except Exception as e:
-            print(f"Telegram notification error: {e}")
+            logger.error("Telegram bildirishnoma xatoligi: %s", e)
 

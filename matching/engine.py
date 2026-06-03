@@ -352,6 +352,7 @@ def create_new_ride(driver, ride_request):
         distance,
         category=ride_request.car_category,
         share_type=ride_request.share_type,
+        apply_surge=True,
     )
 
     ride = Ride.objects.create(

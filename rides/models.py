@@ -349,6 +349,54 @@ class ChatMessage(models.Model):
         ordering = ['created_at']
 
 
+class ServiceZone(models.Model):
+    """
+    Xizmat ko'rsatish hududi (geofencing).
+    Admin panel orqali o'zgartiriladi — kod qayta yozilmaydi.
+    """
+    name = models.CharField(max_length=100, verbose_name='Hudud nomi')
+    is_active = models.BooleanField(default=True, verbose_name='Faol')
+
+    # Chegaralar (to'rtburchak)
+    lat_min = models.FloatField(verbose_name='Minimal kenglik (janub)')
+    lat_max = models.FloatField(verbose_name='Maksimal kenglik (shimol)')
+    lng_min = models.FloatField(verbose_name='Minimal uzunlik (g\'arb)')
+    lng_max = models.FloatField(verbose_name='Maksimal uzunlik (sharq)')
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Xizmat hududi'
+        verbose_name_plural = 'Xizmat hududlari'
+
+    def __str__(self):
+        return self.name
+
+    def contains(self, lat, lng):
+        """Berilgan koordinata hudud ichida ekanligini tekshirish."""
+        return self.lat_min <= lat <= self.lat_max and self.lng_min <= lng <= self.lng_max
+
+    @classmethod
+    def is_within_service_area(cls, lat, lng):
+        """
+        Koordinata birorta faol xizmat hududi ichida ekanligini tekshirish.
+        Agar DB da hech qanday faol zona bo'lmasa, settings.py fallback'iga qaytadi.
+        """
+        zones = cls.objects.filter(is_active=True)
+        if zones.exists():
+            return any(zone.contains(lat, lng) for zone in zones)
+
+        # Fallback: settings.py dagi hardcoded Toshkent chegaralari
+        boundary = getattr(settings, 'TASHKENT_BOUNDARY', {})
+        if boundary:
+            return (
+                boundary['LAT_MIN'] <= lat <= boundary['LAT_MAX'] and
+                boundary['LNG_MIN'] <= lng <= boundary['LNG_MAX']
+            )
+        return True
+
+
 class ReferralBonus(models.Model):
     """Tracks referral bonuses with a ride threshold."""
     user = models.ForeignKey(
