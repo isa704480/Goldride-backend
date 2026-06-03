@@ -336,6 +336,7 @@ LOGGING = {
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
+            'stream': 'ext://sys.stdout',  # stderr emas stdout — terminalda qizil chiqmasin
             'formatter': 'verbose',
         },
     },
