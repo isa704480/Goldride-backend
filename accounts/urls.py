@@ -43,4 +43,11 @@ urlpatterns = [
     # Saved Locations
     path('locations/', views.SavedLocationListCreateView.as_view(), name='saved-locations'),
     path('locations/<int:pk>/', views.SavedLocationDeleteView.as_view(), name='saved-location-delete'),
+
+    # Driver goals
+    path('driver/goals/', views.driver_goals_view, name='driver-goals'),
+    path('driver/goals/select/', views.driver_goal_select_view, name='driver-goal-select'),
+
+    # Referral bonus withdrawal
+    path('wallet/withdraw-referral/', views.withdraw_referral_view, name='wallet-withdraw-referral'),
 ]

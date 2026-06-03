@@ -277,6 +277,37 @@ class Driver(models.Model):
         default=0,
         verbose_name='Komissiya to\'langan (UZS)'
     )
+
+    # Kirish davri komissiyasi: dastlabki 15 buyurtma yoki 48 soat (kamida 8 ta)
+    intro_period_completed = models.BooleanField(
+        default=False,
+        verbose_name='Kirish davri tugagan',
+        help_text='True bo\'lsa, oddiy komissiya qo\'llanadi'
+    )
+    intro_period_start = models.DateTimeField(
+        null=True, blank=True,
+        verbose_name='Kirish davri boshlangan vaqt'
+    )
+
+    # Maqsad chegirmasi: maqsad bajarilgandan keyin N kunlik -2% komissiya
+    commission_discount_until = models.DateField(
+        null=True, blank=True,
+        verbose_name='Komissiya chegirmasi (gacha)'
+    )
+    commission_discount_rate = models.DecimalField(
+        max_digits=4, decimal_places=2, default=0,
+        verbose_name='Komissiya chegirmasi (%)'
+    )
+
+    # Referral — faqat haydovchi boshqa haydovchini taklif qila oladi
+    referred_by_driver = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='referred_drivers',
+        verbose_name='Taklif qilgan haydovchi'
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -586,27 +617,56 @@ class DriverBadge(models.Model):
 
 
 class DriverGoal(models.Model):
-    """Daily/Monthly goals for drivers."""
-    GOAL_TYPE_CHOICES = [
-        ('daily', 'Kunlik'),
-        ('monthly', 'Oylik'),
-    ]
-    title = models.CharField(max_length=100)
-    goal_type = models.CharField(max_length=10, choices=GOAL_TYPE_CHOICES)
-    target_rides = models.IntegerField()
-    reward_amount = models.DecimalField(max_digits=10, decimal_places=2)
-    is_active = models.BooleanField(default=True)
+    """
+    3 kunlik maqsad tizimi.
+    Haydovchi maqsadni OLDINDAN tanlashi kerak.
+    Bajarilganda: bonus + qo'shimcha 10 buyurtma + keyingi 3 kun -2% komissiya.
+    """
+    title = models.CharField(max_length=100, default='', verbose_name='Nomi')
+    min_rides = models.IntegerField(default=0, verbose_name='Kerakli buyurtmalar soni')
+    bonus_amount = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0,
+        verbose_name='Pul mukofoti (UZS)'
+    )
+    extra_orders_bonus = models.IntegerField(
+        default=10,
+        verbose_name='Qo\'shimcha buyurtmalar bonusi'
+    )
+    commission_discount_percent = models.DecimalField(
+        max_digits=4, decimal_places=2, default=2.0,
+        verbose_name='Komissiya chegirmasi (%)'
+    )
+    commission_discount_days = models.IntegerField(
+        default=3,
+        verbose_name='Komissiya chegirmasi davomiyligi (kun)'
+    )
+    period_days = models.IntegerField(
+        default=3,
+        verbose_name='Maqsad davri (kun)'
+    )
+    is_active = models.BooleanField(default=True, verbose_name='Faol')
+    order = models.IntegerField(default=0, verbose_name='Tartib')
 
     class Meta:
-        verbose_name = 'Maqsad'
-        verbose_name_plural = 'Maqsadlar'
+        verbose_name = 'Haydovchi maqsadi'
+        verbose_name_plural = 'Haydovchi maqsadlari'
+        ordering = ['min_rides']
 
     def __str__(self):
-        return f"{self.title} ({self.get_goal_type_display()})"
+        return f"{self.title}: {self.min_rides} buyurtma → {self.bonus_amount:,.0f} UZS"
 
 
 class GoalProgress(models.Model):
-    """Tracks driver progress toward a goal."""
+    """
+    Haydovchining tanlangan maqsad bo'yicha taraqqiyoti.
+    Maqsad oldindan tanlanadi, 3 kun davomida bajarilishi kerak.
+    """
+    STATUS_CHOICES = [
+        ('active', 'Faol'),
+        ('completed', 'Bajarildi'),
+        ('failed', 'Bajarilmadi'),
+    ]
+
     driver = models.ForeignKey(
         Driver,
         on_delete=models.CASCADE,
@@ -617,13 +677,25 @@ class GoalProgress(models.Model):
         on_delete=models.CASCADE
     )
     current_count = models.IntegerField(default=0)
-    is_completed = models.BooleanField(default=False)
-    date = models.DateField(auto_now_add=True)
+    status = models.CharField(
+        max_length=10, choices=STATUS_CHOICES, default='active',
+        verbose_name='Holat'
+    )
+    start_date = models.DateField(null=True, blank=True, verbose_name='Boshlash sanasi')
+    end_date = models.DateField(null=True, blank=True, verbose_name='Tugash sanasi')
+    reward_paid = models.BooleanField(default=False, verbose_name='Mukofot berildi')
+    created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
 
     class Meta:
         verbose_name = 'Maqsad taraqqiyoti'
         verbose_name_plural = 'Maqsadlar taraqqiyoti'
-        unique_together = ['driver', 'goal', 'date']
+
+    def __str__(self):
+        return f"{self.driver.user.phone} — {self.goal.title} ({self.status})"
+
+    def is_expired(self):
+        from django.utils import timezone
+        return timezone.now().date() > self.end_date and self.status == 'active'
 
 class Wallet(models.Model):
     """Virtual wallet for 'Oltin tanga' currency."""
@@ -806,9 +878,9 @@ class WalletRequest(models.Model):
         old_status = None
         if not is_new:
             old_status = WalletRequest.objects.get(pk=self.pk).status
-            
+
         super().save(*args, **kwargs)
-        
+
         # If status changed to approved
         if old_status == 'pending' and self.status == 'approved':
             from django.db import transaction
@@ -818,6 +890,53 @@ class WalletRequest(models.Model):
                     wallet.deposit(self.amount, description=f"Hamyon to'ldirildi (So'rov #{self.id})")
                 elif self.request_type == 'withdraw':
                     if not wallet.withdraw(self.amount, description=f"Mablag' yechildi (So'rov #{self.id})"):
-                        # If withdraw fails (insufficient funds), we might want to handle it
-                        # but usually it's checked before. For safety, we can revert status
                         pass
+
+
+class TelegramOTP(models.Model):
+    """
+    Telegram bot orqali yuborilgan OTP kodlarini DB'da saqlash.
+    Bu bot va veb-server alohida processda ishlayotganda ham ishlaydi
+    (memory cache'dan farqli).
+    """
+    phone = models.CharField(max_length=13, db_index=True, verbose_name='Telefon raqami')
+    otp = models.CharField(max_length=6, verbose_name='OTP kodi')
+    chat_id = models.CharField(max_length=20, blank=True, verbose_name='Telegram Chat ID')
+    expires_at = models.DateTimeField(verbose_name='Amal qilish muddati')
+    is_used = models.BooleanField(default=False, verbose_name='Ishlatilgan')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Telegram OTP'
+        verbose_name_plural = 'Telegram OTPlar'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.phone} — {self.otp}"
+
+    def is_valid(self):
+        from django.utils import timezone
+        return not self.is_used and self.expires_at > timezone.now()
+
+    @classmethod
+    def create_otp(cls, phone, chat_id=''):
+        import random
+        from django.utils import timezone
+        from datetime import timedelta
+        cls.objects.filter(phone=phone, is_used=False).update(is_used=True)
+        otp = str(random.randint(100000, 999999))
+        return cls.objects.create(
+            phone=phone,
+            otp=otp,
+            chat_id=str(chat_id),
+            expires_at=timezone.now() + timedelta(minutes=5),
+        )
+
+    @classmethod
+    def verify(cls, phone, otp):
+        entry = cls.objects.filter(phone=phone, otp=otp, is_used=False).first()
+        if entry and entry.is_valid():
+            entry.is_used = True
+            entry.save(update_fields=['is_used'])
+            return entry
+        return None

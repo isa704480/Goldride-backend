@@ -163,6 +163,17 @@ class RideRequest(models.Model):
         default='solo',
         verbose_name='Safar turi'
     )
+    PAYMENT_METHOD_CHOICES = [
+        ('cash', 'Naqd'),
+        ('card', 'Karta'),
+        ('bonus', 'Bonus'),
+    ]
+    payment_method = models.CharField(
+        max_length=10,
+        choices=PAYMENT_METHOD_CHOICES,
+        default='cash',
+        verbose_name="To'lov usuli"
+    )
     use_bonus = models.BooleanField(
         default=False,
         verbose_name='Bonusdan foydalanish'

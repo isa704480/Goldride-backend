@@ -1,3 +1,4 @@
+import logging
 from rest_framework import status, generics, permissions
 from rest_framework.views import APIView
 from django.contrib.auth import get_user_model
@@ -9,6 +10,8 @@ from django.db import models
 from django.db.models import Q, Sum, Avg, Count, F
 from datetime import timedelta
 from decimal import Decimal
+
+logger = logging.getLogger('rides')
 
 from .models import Ride, RideRequest, RidePassenger, RideRating, RideStop, ChatMessage, EmergencyAlert
 from accounts.models import Driver, FavoriteDriver, User
@@ -278,18 +281,23 @@ def cancel_ride(request, ride_id):
 
         user.last_cancellation_at = now
         
-        # PENALTY: 3 cancellations = 1000 UZS deduction
+        # JARIMA: ketma-ket 3 marta bekor qilish → 1000 UZS yechiladi + xabar
         if user.cancellation_count >= 3:
-            user.cancellation_count = 0 # Reset
-            
-            # Deduct from Wallet
-            try:
-                wallet, _ = Wallet.objects.get_or_create(user=user)
-                wallet.withdraw(1000, description="3 marta bekor qilganlik uchun jarima")
-            except Exception as e:
-                print(f"[PENALTY ERROR] Wallet deduction failed: {e}")
+            user.cancellation_count = 0
 
-            # Notify Admin
+            penalty = Decimal(str(policy.get('PENALTY_STEP_1', 1000)))
+            try:
+                from accounts.models import Wallet
+                wallet, _ = Wallet.objects.get_or_create(user=user)
+                wallet.withdraw(penalty, description="Ketma-ket 3 marta bekor qilish jarimasi")
+                logger.warning(
+                    "Jarima: %s dan %d UZS yechildi (3x bekor qilish)",
+                    user.phone, penalty
+                )
+            except Exception as e:
+                logger.error("Jarima yechishda xatolik %s: %s", user.phone, e)
+
+            # Adminni va mijozni xabardor qilish
             try:
                 from asgiref.sync import async_to_sync
                 from channels.layers import get_channel_layer
@@ -300,13 +308,16 @@ def cancel_ride(request, ride_id):
                         {
                             "type": "admin_notification",
                             "notification_type": "fraud_alert",
-                            "message": f"⚠️ JARIMA! Yo'lovchi {user.phone} 3 marta buyurtma bekor qildi. Hisobidan 1000 so'm yechildi.",
+                            "message": (
+                                f"⚠️ JARIMA! {user.phone} 3 marta ketma-ket buyurtma bekor qildi. "
+                                f"Hisobidan {int(penalty):,} so'm yechildi."
+                            ),
                             "user_id": user.id,
                             "user_phone": user.phone,
                         }
                     )
             except Exception as e:
-                print(f"[ADMIN NOTIFY ERROR] {e}")
+                logger.error("Admin bildirishnomasida xatolik: %s", e)
 
         user.save(update_fields=['cancellation_count', 'last_cancellation_at'])
 
@@ -387,75 +398,101 @@ def mark_arrived(request, ride_id):
 
 
 def _finalize_ride(ride, driver):
-    """Shared completion logic for complete_ride and dropoff_passenger."""
-    from django.conf import settings as conf_settings
-    from pricing.engine import recalculate_ride_fares, calculate_commission
+    """Safar yakunlash: komissiya, keshbek, referral bonus, maqsad."""
+    from pricing.engine import recalculate_ride_fares
     from accounts.models import Wallet
+    from accounts.cashback import (
+        get_driver_commission_rate,
+        apply_passenger_cashback,
+        queue_referral_bonus,
+        is_bonus_usable,
+        check_and_complete_driver_goal,
+        MAX_BONUS_USAGE,
+    )
 
     ride.status = 'completed'
     ride.completed_at = timezone.now()
 
-    now_local = timezone.localtime(timezone.now())
-    current_time_str = now_local.strftime('%H:%M')
-    for hh in conf_settings.HAPPY_HOURS:
-        if hh['start'] <= current_time_str < hh['end']:
-            ride.commission_rate = hh['commission_rate']
-            break
+    # Haydovchi komissiya stavkasini hisoblash (intro / happy hours / goal discount)
+    commission_rate = get_driver_commission_rate(driver)
+    ride.commission_rate = commission_rate
 
     total = recalculate_ride_fares(ride)
     is_shared = ride.passengers.count() > 1
+
+    from pricing.engine import calculate_commission
     ride.commission_amount = calculate_commission(total, is_shared=is_shared)
     ride.driver_earnings = total - ride.commission_amount
     ride.save()
 
     driver_wallet, _ = Wallet.objects.get_or_create(user=driver.user)
-    driver_wallet.deposit(ride.driver_earnings)
+    driver_wallet.deposit(ride.driver_earnings, f"Safar #{ride.id} daromadi")
 
     for passenger in ride.passengers.all():
         pass_wallet, _ = Wallet.objects.get_or_create(user=passenger.user)
         user = passenger.user
-        fare = passenger.fare
-        bonus_usage = Decimal('0')
+        fare = Decimal(str(passenger.fare))
         req = passenger.ride_request
+        payment_method = getattr(req, 'payment_method', 'cash') if req else 'cash'
+        bonus_usage = Decimal('0')
 
-        if req and req.use_bonus and user.bonus_balance > 0:
-            max_bonus_allowed = fare * Decimal('0.7')
-            bonus_intent_factor = Decimal(str(req.bonus_percent)) / Decimal('100')
-            target_bonus = max_bonus_allowed * bonus_intent_factor
-            bonus_usage = min(user.bonus_balance, target_bonus)
+        # Bonus ishlatish (faqat 6-safardan keyin)
+        if req and req.use_bonus and user.bonus_balance > 0 and is_bonus_usable(user):
+            max_bonus = fare * MAX_BONUS_USAGE
+            intent = Decimal(str(req.bonus_percent)) / Decimal('100')
+            target = max_bonus * intent
+            bonus_usage = min(user.bonus_balance, target)
+            from decimal import ROUND_HALF_UP
+            bonus_usage = bonus_usage.quantize(Decimal('1'), rounding=ROUND_HALF_UP)
             user.bonus_balance -= bonus_usage
             user.save(update_fields=['bonus_balance'])
+        elif req and req.use_bonus and not is_bonus_usable(user):
+            # Hali 6-safardan o'tmagan — bonusni bloklash
+            from rides.utils import notify_ride_status_update as _n
+            pass  # Frontend xabar beradi
 
         remaining_fare = fare - bonus_usage
         if remaining_fare > 0:
-            pass_wallet.withdraw(remaining_fare, description=f"Safar to'lovi #{ride.id} (Bonus: {bonus_usage})")
+            pass_wallet.withdraw(
+                remaining_fare,
+                description=f"Safar #{ride.id} to'lovi (bonus: {int(bonus_usage)} UZS)"
+            )
 
-        points = int(passenger.fare / 1000)
+        # GoldPoints: har 1000 UZS uchun 1 ball
+        points = int(fare / 1000)
         if points > 0:
-            passenger.user.add_gold_points(points)
+            user.add_gold_points(points)
 
-        if passenger.user.referred_by:
-            inviter = passenger.user.referred_by
-            passenger.user.referral_rides_count += 1
-            passenger.user.save(update_fields=['referral_rides_count'])
-            bonus_amount = Decimal('0')
-            if passenger.user.referral_rides_count <= 10:
-                bonus_amount = passenger.fare * Decimal('0.05')
-            else:
-                bonus_amount = passenger.fare * Decimal('0.01')
-            if passenger.user.referral_rides_count == 20:
-                bonus_amount += Decimal('30000')
-            if bonus_amount > 0:
-                inviter_wallet, _ = Wallet.objects.get_or_create(user=inviter)
-                inviter_wallet.deposit(
-                    bonus_amount,
-                    description=f"Referal bonus: {passenger.user.phone} ({passenger.user.referral_rides_count}-safar)"
-                )
+        # Yo'lovchiga keshbek (kirish davri yoki doimiy)
+        apply_passenger_cashback(user, fare, payment_method)
 
-    driver.commission_paid += ride.commission_amount
-    driver.total_earnings += ride.total_price
-    driver.total_rides += 1
-    driver.save()
+        # Mijoz safarlar soni +1
+        user.total_passenger_rides = (user.total_passenger_rides or 0) + 1
+        user.save(update_fields=['total_passenger_rides'])
+
+        # Referral bonus (ertaga tushadi)
+        if user.referred_by:
+            queue_referral_bonus(
+                referrer=user.referred_by,
+                passenger=user,
+                fare=fare,
+                payment_method=payment_method,
+            )
+            user.referral_rides_count = (user.referral_rides_count or 0) + 1
+            user.save(update_fields=['referral_rides_count'])
+
+    # Haydovchi statistikasi yangilash
+    driver.commission_paid = (driver.commission_paid or Decimal('0')) + ride.commission_amount
+    driver.total_earnings = (driver.total_earnings or Decimal('0')) + ride.total_price
+    driver.total_rides = (driver.total_rides or 0) + 1
+    driver.total_rides_completed = (driver.total_rides_completed or 0) + 1
+    driver.save(update_fields=[
+        'commission_paid', 'total_earnings', 'total_rides',
+        'total_rides_completed', 'intro_period_completed',
+    ])
+
+    # Haydovchi maqsad taraqqiyoti tekshiruvi
+    check_and_complete_driver_goal(driver, ride)
 
     ride.passengers.filter(dropped_off=False).update(dropped_off=True, dropped_off_at=timezone.now())
     ride.requests.filter(status__in=['accepted', 'arrived', 'started']).update(status='completed')

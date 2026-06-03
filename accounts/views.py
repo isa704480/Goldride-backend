@@ -104,17 +104,18 @@ def verify_otp_view(request):
     otp = request.data.get('otp')
     tg_login = request.data.get('tg_login', False)
 
-    # --- TELEGRAM 6-digit OTP flow ---
+    # --- TELEGRAM 6 xonali OTP flow ---
     if tg_login and phone and otp:
-        from django.core.cache import cache as django_cache
+        from accounts.models import TelegramOTP
         if not phone.startswith('+'): phone = '+' + phone
-        stored_otp = django_cache.get(f'tg_otp:{phone}')
-        if not stored_otp or stored_otp != str(otp):
+
+        # DB dan tekshirish (cache emas — process izolyatsiyasi muammosi yo'q)
+        otp_entry = TelegramOTP.verify(phone, str(otp))
+        if not otp_entry:
+            logger.warning("Telegram OTP xato: %s", phone)
             return Response({'detail': 'Kod noto\'g\'ri yoki muddati o\'tgan.'}, status=400)
 
-        chat_id = django_cache.get(f'tg_chat:{phone}')
-        django_cache.delete(f'tg_otp:{phone}')
-        django_cache.delete(f'tg_chat:{phone}')
+        chat_id = otp_entry.chat_id
 
         user = User.objects.filter(phone=phone).first()
         device_id = request.data.get('device_id')
@@ -1003,3 +1004,127 @@ def wallet_requests_view(request):
             
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ============ HAYDOVCHI MAQSADLARI ============
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def driver_goals_view(request):
+    """Barcha faol maqsadlar va haydovchining joriy taraqqiyoti."""
+    from .models import DriverGoal, GoalProgress
+    from django.utils import timezone
+
+    try:
+        driver = request.user.driver_profile
+    except Driver.DoesNotExist:
+        return Response({'detail': 'Haydovchi profili topilmadi.'}, status=404)
+
+    goals = DriverGoal.objects.filter(is_active=True)
+    today = timezone.now().date()
+
+    # Haydovchining faol maqsadini topish
+    active_progress = GoalProgress.objects.filter(
+        driver=driver, status='active'
+    ).select_related('goal').first()
+
+    result = []
+    for goal in goals:
+        result.append({
+            'id': goal.id,
+            'title': goal.title,
+            'min_rides': goal.min_rides,
+            'bonus_amount': goal.bonus_amount,
+            'extra_orders_bonus': goal.extra_orders_bonus,
+            'commission_discount_percent': goal.commission_discount_percent,
+            'commission_discount_days': goal.commission_discount_days,
+            'period_days': goal.period_days,
+            'is_selected': active_progress and active_progress.goal_id == goal.id,
+            'current_count': active_progress.current_count if (active_progress and active_progress.goal_id == goal.id) else 0,
+            'end_date': str(active_progress.end_date) if (active_progress and active_progress.goal_id == goal.id) else None,
+        })
+
+    return Response({
+        'goals': result,
+        'active_goal_id': active_progress.goal_id if active_progress else None,
+        'commission_discount_until': str(driver.commission_discount_until) if driver.commission_discount_until else None,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def driver_goal_select_view(request):
+    """Haydovchi maqsad tanlaydi (oldindan tanlash shart)."""
+    from .models import DriverGoal, GoalProgress
+    from django.utils import timezone
+    from datetime import timedelta
+
+    try:
+        driver = request.user.driver_profile
+    except Driver.DoesNotExist:
+        return Response({'detail': 'Haydovchi profili topilmadi.'}, status=404)
+
+    goal_id = request.data.get('goal_id')
+    if not goal_id:
+        return Response({'detail': 'goal_id kiritilishi shart.'}, status=400)
+
+    # Avval faol maqsad bormi?
+    existing = GoalProgress.objects.filter(driver=driver, status='active').first()
+    if existing:
+        return Response({
+            'detail': 'Sizda allaqachon faol maqsad bor. Uni tugatgandan yoki muddati o\'tganidan keyin yangi tanlang.',
+            'end_date': str(existing.end_date),
+        }, status=400)
+
+    try:
+        goal = DriverGoal.objects.get(id=goal_id, is_active=True)
+    except DriverGoal.DoesNotExist:
+        return Response({'detail': 'Maqsad topilmadi.'}, status=404)
+
+    today = timezone.now().date()
+    progress = GoalProgress.objects.create(
+        driver=driver,
+        goal=goal,
+        start_date=today,
+        end_date=today + timedelta(days=goal.period_days),
+        status='active',
+    )
+
+    logger.info("Maqsad tanlandi: %s → %s (tugash: %s)", driver.user.phone, goal.title, progress.end_date)
+
+    return Response({
+        'detail': f"Maqsad tanlandi: {goal.title}",
+        'start_date': str(progress.start_date),
+        'end_date': str(progress.end_date),
+        'goal': {
+            'min_rides': goal.min_rides,
+            'bonus_amount': goal.bonus_amount,
+            'period_days': goal.period_days,
+        }
+    })
+
+
+# ============ REFERRAL BONUS YECHISH ============
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def withdraw_referral_view(request):
+    """Referral bonusni kartaga yechib olish (2% komissiya, min 1000 UZS qoldiq)."""
+    from accounts.cashback import withdraw_referral_bonus
+
+    amount_raw = request.data.get('amount')
+    if not amount_raw:
+        return Response({'detail': 'Miqdor kiritilishi shart.'}, status=400)
+
+    try:
+        amount = Decimal(str(amount_raw))
+        if amount <= 0:
+            raise ValueError
+    except (ValueError, Exception):
+        return Response({'detail': 'Noto\'g\'ri miqdor.'}, status=400)
+
+    success, message = withdraw_referral_bonus(request.user, amount)
+    if not success:
+        return Response({'detail': message}, status=400)
+
+    return Response({'detail': message})
