@@ -36,10 +36,11 @@ CASHBACK_REGULAR   = Decimal('0.02')    # 6+ safar
 INTRO_RIDE_LIMIT   = 5                  # Kirish davri buyurtmalar soni
 MAX_BONUS_USAGE    = Decimal('0.70')    # Bonusdan maksimal foydalanish ulushi
 
-REFERRAL_BONUS_CASH = Decimal('0.01')   # Do'st naqd to'lasa
-REFERRAL_BONUS_CARD = Decimal('0.02')   # Do'st karta bilan to'lasa
-REFERRAL_WITHDRAWAL_FEE = Decimal('0.02')   # Yechib olishda komissiya
-REFERRAL_MIN_BALANCE = Decimal('1000')  # Yechib olgandan keyin min qoldiq
+REFERRAL_BONUS_CASH = Decimal('0.01')        # Mijoz do'sti naqd to'lasa
+REFERRAL_BONUS_CARD = Decimal('0.02')        # Mijoz do'sti karta bilan to'lasa
+DRIVER_REFERRAL_RATE = Decimal('0.005')      # Haydovchi referal: 0.5% har safar
+REFERRAL_WITHDRAWAL_FEE = Decimal('0.02')    # Yechib olishda komissiya
+REFERRAL_MIN_BALANCE = Decimal('1000')       # Yechib olgandan keyin min qoldiq
 
 
 def get_passenger_cashback_rate(user, payment_method: str) -> Decimal:
@@ -156,6 +157,27 @@ def withdraw_referral_bonus(user, amount: Decimal) -> tuple[bool, str]:
     wallet.withdraw(amount, f"Referral bonus yechish: {int(amount):,} UZS")
     wallet.withdraw(commission, f"Yechish komissiyasi (2%): {int(commission):,} UZS")
     return True, f"{int(amount):,} UZS muvaffaqiyatli yechildi (komissiya: {int(commission):,} UZS)"
+
+
+def queue_driver_referral_bonus(referring_driver, fare: Decimal):
+    """
+    Haydovchi referal bonusi: taklif qilgan haydovchiga
+    yangi haydovchi va yo'lovchining har safaridan 0.5% bonus.
+    Bonus pending_referral_bonus orqali ertaga tushadi.
+    """
+    bonus = (fare * DRIVER_REFERRAL_RATE).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
+    if bonus <= 0:
+        return
+
+    referring_driver.user.pending_referral_bonus = (
+        referring_driver.user.pending_referral_bonus or Decimal('0')
+    ) + bonus
+    referring_driver.user.save(update_fields=['pending_referral_bonus'])
+
+    logger.info(
+        "Haydovchi referal bonus: %s → %d UZS (ertaga tushadi)",
+        referring_driver.user.phone, bonus
+    )
 
 
 # ---------------------------------------------------------------------------

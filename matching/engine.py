@@ -280,15 +280,18 @@ def _try_assign_driver(driver, ride_request, max_passengers, max_deviation):
         if not locked_driver:
             return None
 
-        has_active = Ride.objects.filter(
+        # Bir vaqtda maksimal 3 ta faol buyurtma (settings dan)
+        max_concurrent = settings.DRIVER_BALANCE.get('MAX_CONCURRENT_RIDES', 3)
+        active_count = Ride.objects.filter(
             driver=locked_driver,
             status__in=['searching', 'driver_found', 'on_the_way', 'started'],
-        ).exists()
+        ).count()
 
-        if has_active and not ride_request.is_shared:
+        if active_count >= max_concurrent:
             return None
 
-        if has_active:
+        if active_count > 0 and ride_request.is_shared:
+            # Mavjud hamrohlik safariga qo'shib bo'ladimi?
             active_ride = Ride.objects.filter(
                 driver=locked_driver,
                 status__in=['searching', 'driver_found', 'on_the_way'],
@@ -298,7 +301,6 @@ def _try_assign_driver(driver, ride_request, max_passengers, max_deviation):
             if active_ride and active_ride.passengers.count() < max_passengers:
                 if calculate_route_deviation(active_ride, ride_request) <= max_deviation:
                     return add_to_existing_ride(active_ride, ride_request)
-            return None
 
         # Haydovchini band qilish (boshqa so'rov kelmasin)
         locked_driver.is_being_requested = True

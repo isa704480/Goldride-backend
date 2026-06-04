@@ -282,19 +282,18 @@ MATCHING = {
     'DRIVER_LOCATION_UPDATE_INTERVAL': 3,
 }
 
-# Happy Hours — Kam komissiya vaqtlari
-# Masalan, 07:00-09:00 va 17:00-19:00 da komissiya 2% bo'ladi (odatiy 5%)
+# Happy Hours — faqat ertalab 07:00–09:00 (16%/15% komissiya)
 HAPPY_HOURS = [
-    {'start': '07:00', 'end': '09:00', 'commission_rate': 0.02, 'label': 'Ertalabki soatlar'},
-    {'start': '17:00', 'end': '19:00', 'commission_rate': 0.02, 'label': 'Kechki soatlar'},
+    {'start': '07:00', 'end': '09:00', 'commission_rate': 0.16, 'label': 'Ertalabki soatlar'},
 ]
 
-# Haydovchi minimal balans sozlamalari (UZS)
+# Haydovchi minimal balans va bonus sozlamalari (UZS)
 DRIVER_BALANCE = {
-    'FIRST_MONTH_MINIMUM': 10000,   # 1-oy ichida minimal balans (bonus bilan kirish uchun)
+    'FIRST_MONTH_MINIMUM': 10000,   # 1-oy ichida minimal balans
     'AFTER_MONTH_MINIMUM': 20000,   # 2+ oydan keyingi minimal balans
-    'SIGNUP_BONUS': 20000,          # Yangi haydovchiga beriladigan bonus
+    'SIGNUP_BONUS': 10000,          # Yangi haydovchiga beriladigan kirish bonusi
     'FIRST_MONTH_DAYS': 30,         # 1-oy davomiyligi (kunlarda)
+    'MAX_CONCURRENT_RIDES': 3,      # Bir vaqtda maksimal faol buyurtmalar soni
 }
 
 # Yo'lovchi bekor qilish jarimasi

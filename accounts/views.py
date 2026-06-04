@@ -1,4 +1,5 @@
 import logging
+from django.utils import timezone
 from rest_framework import status, generics, permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -822,13 +823,18 @@ def admin_driver_action(request, driver_id):
         driver.user.is_verified = True
         driver.user.save()
 
-        # === Yangi haydovchiga boshlang'ich bonus berish ===
+        # Kirish davri boshlash vaqtini tasdiqlanish paytiga o'rnatish
+        if not driver.intro_period_start:
+            driver.intro_period_start = timezone.now()
+            driver.save(update_fields=['intro_period_start'])
+
+        # Yangi haydovchiga 10,000 UZS kirish bonusi
         from django.conf import settings as conf_settings
-        from accounts.models import Wallet, WalletTransaction
+        from accounts.models import Wallet
         bonus = conf_settings.DRIVER_BALANCE['SIGNUP_BONUS']
         wallet, created = Wallet.objects.get_or_create(user=driver.user)
         if created or wallet.balance == 0:
-            wallet.deposit(bonus, f"Yangi haydovchi bonusi ({bonus:,} UZS)")
+            wallet.deposit(bonus, f"Kirish bonusi: {bonus:,} UZS")
 
     elif action == 'reject':
         driver.status = 'rejected'

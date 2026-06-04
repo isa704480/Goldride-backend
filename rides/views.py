@@ -414,6 +414,7 @@ def _finalize_ride(ride, driver):
         get_driver_commission_rate,
         apply_passenger_cashback,
         queue_referral_bonus,
+        queue_driver_referral_bonus,
         is_bonus_usable,
         check_and_complete_driver_goal,
         MAX_BONUS_USAGE,
@@ -499,6 +500,12 @@ def _finalize_ride(ride, driver):
         'commission_paid', 'total_earnings', 'total_rides',
         'total_rides_completed', 'intro_period_completed',
     ])
+
+    # Haydovchi referal bonusi (0.5%) — taklif qilgan haydovchiga
+    # Haydovchining o'z safaridan ham, yo'lovchi safaridan ham 0.5%
+    if driver.referred_by_driver:
+        fare_total = Decimal(str(ride.total_price or 0))
+        queue_driver_referral_bonus(driver.referred_by_driver, fare_total)
 
     # Haydovchi maqsad taraqqiyoti tekshiruvi
     check_and_complete_driver_goal(driver, ride)
