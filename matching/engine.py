@@ -90,13 +90,20 @@ def get_nearby_drivers(lat, lng, radius_km=None, requested_category='economy'):
     except ValueError:
         eligible_classes = [category]
 
+    # 60 soniyadan oshgan eskirgan qulflarni tozalash (haydovchi javob bermasa)
+    stale_cutoff = timezone.now() - timedelta(seconds=60)
+    Driver.objects.filter(
+        is_being_requested=True,
+        updated_at__lt=stale_cutoff
+    ).update(is_being_requested=False)
+
     drivers_qs = Driver.objects.filter(
         is_online=True,
         status='approved',
         current_lat__isnull=False,
         current_lng__isnull=False,
         vehicle__car_class__in=eligible_classes,
-        is_being_requested=False,  # Hozir boshqa so'rov kutayotgan haydovchilar chiqarib tashlanadi
+        is_being_requested=False,
     ).select_related('user', 'vehicle', 'user__wallet')
 
     bal_cfg = settings.DRIVER_BALANCE

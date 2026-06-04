@@ -214,9 +214,11 @@ def accept_ride(request, ride_id):
     ride.status = 'driver_found'
     ride.save()
 
-    # Update all pending requests for this ride
-    ride.requests.filter(status='matched').update(status='accepted')
+    # Haydovchi qulfini ochish — endi yangi buyurtma qabul qila oladi
+    driver.is_being_requested = False
+    driver.save(update_fields=['is_being_requested'])
 
+    ride.requests.filter(status='matched').update(status='accepted')
     notify_ride_status_update(ride.id, 'driver_found')
 
     return Response(RideSerializer(ride).data)
@@ -322,7 +324,14 @@ def cancel_ride(request, ride_id):
         user.save(update_fields=['cancellation_count', 'last_cancellation_at'])
 
     else:
-        # Driver cancelling entire ride
+        # Haydovchi bekor qiladi — qulfni ochish
+        try:
+            driver = request.user.driver_profile
+            driver.is_being_requested = False
+            driver.save(update_fields=['is_being_requested'])
+        except Exception:
+            pass
+
         ride.status = 'cancelled'
         ride.save()
         ride.requests.exclude(status__in=['completed', 'cancelled']).update(
