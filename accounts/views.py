@@ -1242,3 +1242,183 @@ def withdraw_referral_view(request):
         return Response({'detail': message}, status=400)
 
     return Response({'detail': message})
+
+
+# ============ TAKSI PARK ============
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def taxi_park_register_view(request):
+    """Yangi taksi parkini ro'yxatdan o'tkazish (saytdan)."""
+    from .models import TaxiPark
+    data = request.data
+    required = ['name', 'phone', 'contact_person']
+    for field in required:
+        if not data.get(field):
+            return Response({'detail': f'{field} majburiy.'}, status=400)
+
+    if TaxiPark.objects.filter(phone=data['phone']).exists():
+        return Response({'detail': 'Bu telefon raqam allaqachon ro\'yxatdan o\'tgan.'}, status=400)
+
+    park = TaxiPark.objects.create(
+        name=data['name'],
+        phone=data['phone'],
+        contact_person=data['contact_person'],
+        address=data.get('address', ''),
+        inn=data.get('inn', ''),
+        description=data.get('description', ''),
+        status='pending',
+    )
+    logger.info("Yangi taksi park: %s (%s)", park.name, park.phone)
+    return Response({
+        'detail': 'Ro\'yxatdan o\'tdingiz. Admin tasdiqlaganidan keyin xabardor qilamiz.',
+        'park_id': park.id,
+    }, status=201)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def taxi_park_list_public_view(request):
+    """Tasdiqlangan taksi parklarini ko'rsatish (haydovchi ro'yxatdan o'tishda tanlash uchun)."""
+    from .models import TaxiPark
+    parks = TaxiPark.objects.filter(status='approved').values('id', 'name', 'address', 'driver_count')
+    return Response(list(parks))
+
+
+class AdminTaxiParkListView(generics.ListAPIView):
+    """Admin: barcha taksi parklari ro'yxati."""
+    permission_classes = [permissions.IsAdminUser]
+
+    def get_queryset(self):
+        from .models import TaxiPark
+        return TaxiPark.objects.all().order_by('-created_at')
+
+    def list(self, request, *args, **kwargs):
+        from .models import TaxiPark
+        parks = TaxiPark.objects.all().order_by('-created_at')
+        data = []
+        for p in parks:
+            data.append({
+                'id': p.id,
+                'name': p.name,
+                'phone': p.phone,
+                'contact_person': p.contact_person,
+                'address': p.address,
+                'inn': p.inn,
+                'status': p.status,
+                'driver_count': p.driver_count,
+                'api_token': p.api_token,
+                'created_at': p.created_at,
+            })
+        return Response(data)
+
+
+class AdminTaxiParkDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """Admin: taksi park detail."""
+    permission_classes = [permissions.IsAdminUser]
+
+    def get_queryset(self):
+        from .models import TaxiPark
+        return TaxiPark.objects.all()
+
+    def get_serializer_class(self):
+        from rest_framework import serializers
+        class TaxiParkSerializer(serializers.ModelSerializer):
+            driver_count = serializers.SerializerMethodField()
+            def get_driver_count(self, obj): return obj.driver_count
+            class Meta:
+                from accounts.models import TaxiPark as TP
+                model = TP
+                fields = '__all__'
+        return TaxiParkSerializer
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAdminUser])
+def admin_taxi_park_action(request, park_id):
+    """Admin: taksi parkni tasdiqlash/bloklash."""
+    from .models import TaxiPark
+    try:
+        park = TaxiPark.objects.get(id=park_id)
+    except TaxiPark.DoesNotExist:
+        return Response({'detail': 'Park topilmadi.'}, status=404)
+
+    action = request.data.get('action')
+    if action == 'approve':
+        park.status = 'approved'
+    elif action == 'reject':
+        park.status = 'rejected'
+    elif action == 'block':
+        park.status = 'blocked'
+    else:
+        return Response({'detail': 'Noto\'g\'ri amal.'}, status=400)
+
+    park.save(update_fields=['status'])
+    return Response({'status': park.status, 'detail': f'{park.name} → {park.status}'})
+
+
+class AdminTaxiParkDriversView(generics.ListAPIView):
+    """Admin: taksi park haydovchilari ro'yxati."""
+    serializer_class = DriverProfileSerializer
+    permission_classes = [permissions.IsAdminUser]
+
+    def get_queryset(self):
+        return Driver.objects.filter(
+            taxi_park_id=self.kwargs['park_id']
+        ).select_related('user', 'vehicle')
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAdminUser])
+def admin_taxi_park_add_driver(request, park_id):
+    """Admin: taksi parkka yangi haydovchi qo'shish (to'liq ma'lumot bilan)."""
+    from .models import TaxiPark, Vehicle, Wallet
+    try:
+        park = TaxiPark.objects.get(id=park_id)
+    except TaxiPark.DoesNotExist:
+        return Response({'detail': 'Park topilmadi.'}, status=404)
+
+    data = request.data
+    phone = data.get('phone')
+    if not phone:
+        return Response({'detail': 'Telefon raqami majburiy.'}, status=400)
+
+    if User.objects.filter(phone=phone).exists():
+        return Response({'detail': 'Bu telefon raqam allaqachon ro\'yxatda.'}, status=400)
+
+    user = User.objects.create(
+        phone=phone,
+        first_name=data.get('first_name', ''),
+        last_name=data.get('last_name', ''),
+        role='driver',
+        is_verified=True,
+        is_active=True,
+    )
+    password = data.get('password', 'taksi123')
+    user.set_password(password)
+    user.save()
+
+    vehicle = Vehicle.objects.create(
+        make=data.get('vehicle_make', ''),
+        model=data.get('vehicle_model', ''),
+        plate_number=data.get('plate_number', ''),
+        color=data.get('vehicle_color', 'white'),
+        year=data.get('year', 2020),
+        vehicle_type=data.get('vehicle_type', 'sedan'),
+    )
+
+    driver = Driver.objects.create(
+        user=user,
+        vehicle=vehicle,
+        license_number=data.get('license_number', ''),
+        taxi_park=park,
+        status='approved',
+        intro_period_start=timezone.now(),
+    )
+
+    from django.conf import settings as conf_settings
+    bonus = conf_settings.DRIVER_BALANCE['SIGNUP_BONUS']
+    wallet, _ = Wallet.objects.get_or_create(user=user)
+    wallet.deposit(bonus, f"Kirish bonusi — {park.name} parki")
+
+    return Response(DriverProfileSerializer(driver).data, status=201)

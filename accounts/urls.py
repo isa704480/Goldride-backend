@@ -50,4 +50,15 @@ urlpatterns = [
 
     # Referral bonus withdrawal
     path('wallet/withdraw-referral/', views.withdraw_referral_view, name='wallet-withdraw-referral'),
+
+    # Taksi park (public registration)
+    path('taxi-park/register/', views.taxi_park_register_view, name='taxi-park-register'),
+    path('taxi-park/list/', views.taxi_park_list_public_view, name='taxi-park-list-public'),
+
+    # Admin — Taksi parklar
+    path('admin/taxi-parks/', views.AdminTaxiParkListView.as_view(), name='admin-taxi-parks'),
+    path('admin/taxi-parks/<int:pk>/', views.AdminTaxiParkDetailView.as_view(), name='admin-taxi-park-detail'),
+    path('admin/taxi-parks/<int:park_id>/action/', views.admin_taxi_park_action, name='admin-taxi-park-action'),
+    path('admin/taxi-parks/<int:park_id>/drivers/', views.AdminTaxiParkDriversView.as_view(), name='admin-taxi-park-drivers'),
+    path('admin/taxi-parks/<int:park_id>/drivers/add/', views.admin_taxi_park_add_driver, name='admin-taxi-park-add-driver'),
 ]

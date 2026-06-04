@@ -191,6 +191,50 @@ class User(AbstractUser):
         return f"{self.get_full_name() or self.phone} ({self.get_role_display()})"
 
 
+class TaxiPark(models.Model):
+    """Taksi parki — bir guruh haydovchilar egasi."""
+
+    STATUS_CHOICES = [
+        ('pending', 'Kutilmoqda'),
+        ('approved', 'Tasdiqlangan'),
+        ('rejected', 'Rad etilgan'),
+        ('blocked', 'Bloklangan'),
+    ]
+
+    name = models.CharField(max_length=200, verbose_name='Park nomi')
+    phone = models.CharField(max_length=13, unique=True, verbose_name='Telefon')
+    contact_person = models.CharField(max_length=100, verbose_name='Mas\'ul shaxs')
+    address = models.CharField(max_length=255, blank=True, verbose_name='Manzil')
+    inn = models.CharField(max_length=20, blank=True, verbose_name='INN')
+    description = models.TextField(blank=True, verbose_name='Tavsif')
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending', verbose_name='Status')
+    logo = models.ImageField(upload_to='taxi_parks/', null=True, blank=True, verbose_name='Logo')
+
+    # API kirish uchun token (park o'z haydovchilarini boshqaradi)
+    api_token = models.CharField(max_length=64, unique=True, blank=True, verbose_name='API token')
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Taksi parki'
+        verbose_name_plural = 'Taksi parklari'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.name} ({self.get_status_display()})"
+
+    def save(self, *args, **kwargs):
+        if not self.api_token:
+            import secrets
+            self.api_token = secrets.token_hex(32)
+        super().save(*args, **kwargs)
+
+    @property
+    def driver_count(self):
+        return self.drivers.count()
+
+
 class Driver(models.Model):
     """Extended profile for drivers."""
 
@@ -276,6 +320,15 @@ class Driver(models.Model):
         decimal_places=2,
         default=0,
         verbose_name='Komissiya to\'langan (UZS)'
+    )
+
+    # Taksi parki: Solo bo'lsa None, parkga tegishli bo'lsa FK
+    taxi_park = models.ForeignKey(
+        TaxiPark,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='drivers',
+        verbose_name='Taksi parki'
     )
 
     # Kirish davri komissiyasi: dastlabki 15 buyurtma yoki 48 soat (kamida 8 ta)
