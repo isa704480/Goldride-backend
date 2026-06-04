@@ -1422,3 +1422,225 @@ def admin_taxi_park_add_driver(request, park_id):
     wallet.deposit(bonus, f"Kirish bonusi — {park.name} parki")
 
     return Response(DriverProfileSerializer(driver).data, status=201)
+
+
+# ============ TAKSI PARK PORTAL ============
+
+def _get_park_from_token(request):
+    """Authorization: Token <api_token> yoki Bearer <api_token> orqali park olish."""
+    from .models import TaxiPark
+    auth = request.headers.get('Authorization', '')
+    token = None
+    if auth.startswith('Token '):
+        token = auth[6:]
+    elif auth.startswith('Bearer '):
+        token = auth[7:]
+    if not token:
+        return None
+    return TaxiPark.objects.filter(api_token=token, status='approved').first()
+
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def taxi_park_login_view(request):
+    """Taksi park portali uchun login: telefon + parol → api_token qaytaradi."""
+    from .models import TaxiPark
+    phone = request.data.get('phone')
+    password = request.data.get('password')
+    if not phone or not password:
+        return Response({'detail': 'Telefon va parol kiritilishi shart.'}, status=400)
+
+    park = TaxiPark.objects.filter(phone=phone).first()
+    if not park:
+        return Response({'detail': 'Park topilmadi.'}, status=401)
+    if park.status == 'pending':
+        return Response({'detail': 'Parkingiz hali tasdiqlanmagan. Admin tasdiqlashini kuting.'}, status=403)
+    if park.status in ('rejected', 'blocked'):
+        return Response({'detail': f'Parkingiz {park.get_status_display()}. Admin bilan bog\'laning.'}, status=403)
+
+    # Parol — parkni ro'yxatdan o'tkazganda o'rnatilgan (API token = parol sifatida ishlatiladi yoki alohida parol)
+    # Soddalik uchun: parol = api_token ning dastlabki 8 belgisi
+    if not (password == park.api_token[:8] or password == park.api_token):
+        return Response({'detail': 'Noto\'g\'ri parol.'}, status=401)
+
+    return Response({
+        'token': park.api_token,
+        'park': {
+            'id': park.id,
+            'name': park.name,
+            'phone': park.phone,
+            'contact_person': park.contact_person,
+            'address': park.address,
+            'driver_count': park.driver_count,
+            'status': park.status,
+        }
+    })
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def taxi_park_me_view(request):
+    """Joriy park ma'lumotlari."""
+    park = _get_park_from_token(request)
+    if not park:
+        return Response({'detail': 'Token yaroqsiz.'}, status=401)
+    return Response({
+        'id': park.id, 'name': park.name, 'phone': park.phone,
+        'contact_person': park.contact_person, 'address': park.address,
+        'inn': park.inn, 'driver_count': park.driver_count, 'status': park.status,
+    })
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([permissions.AllowAny])
+def taxi_park_drivers_view(request):
+    """Park haydovchilari: ro'yxat (GET) va yangi qo'shish (POST)."""
+    park = _get_park_from_token(request)
+    if not park:
+        return Response({'detail': 'Token yaroqsiz.'}, status=401)
+
+    if request.method == 'GET':
+        drivers = Driver.objects.filter(taxi_park=park).select_related('user', 'vehicle')
+        return Response(DriverProfileSerializer(drivers, many=True).data)
+
+    # POST — yangi haydovchi
+    from .models import Vehicle, Wallet
+    data = request.data
+    phone = data.get('phone')
+    if not phone:
+        return Response({'detail': 'Telefon majburiy.'}, status=400)
+    if User.objects.filter(phone=phone).exists():
+        return Response({'detail': 'Bu telefon allaqachon ro\'yxatda.'}, status=400)
+
+    user = User.objects.create(
+        phone=phone, first_name=data.get('first_name', ''),
+        last_name=data.get('last_name', ''), role='driver',
+        is_verified=True, is_active=True,
+    )
+    user.set_password(data.get('password', 'taksi123'))
+    user.save()
+
+    vehicle = Vehicle.objects.create(
+        make=data.get('vehicle_make', ''), model=data.get('vehicle_model', ''),
+        plate_number=data.get('plate_number', ''), color=data.get('vehicle_color', 'white'),
+        year=data.get('year', 2020), vehicle_type=data.get('vehicle_type', 'sedan'),
+    )
+
+    from django.conf import settings as conf
+    driver = Driver.objects.create(
+        user=user, vehicle=vehicle,
+        license_number=data.get('license_number', ''),
+        taxi_park=park, status='approved',
+        intro_period_start=timezone.now(),
+    )
+    wallet, _ = Wallet.objects.get_or_create(user=user)
+    wallet.deposit(conf.DRIVER_BALANCE['SIGNUP_BONUS'], f"Kirish bonusi — {park.name}")
+    return Response(DriverProfileSerializer(driver).data, status=201)
+
+
+@api_view(['GET', 'PUT', 'DELETE'])
+@permission_classes([permissions.AllowAny])
+def taxi_park_driver_detail_view(request, driver_id):
+    """Park haydovchi detail: ko'rish, tahrirlash, o'chirish."""
+    park = _get_park_from_token(request)
+    if not park:
+        return Response({'detail': 'Token yaroqsiz.'}, status=401)
+
+    try:
+        driver = Driver.objects.get(id=driver_id, taxi_park=park)
+    except Driver.DoesNotExist:
+        return Response({'detail': 'Haydovchi topilmadi.'}, status=404)
+
+    if request.method == 'GET':
+        return Response(DriverProfileSerializer(driver).data)
+
+    if request.method == 'PUT':
+        data = request.data
+        user = driver.user
+        user.first_name = data.get('first_name', user.first_name)
+        user.last_name = data.get('last_name', user.last_name)
+        if data.get('password'):
+            user.set_password(data['password'])
+        user.save()
+        if driver.vehicle:
+            v = driver.vehicle
+            v.make  = data.get('vehicle_make', v.make)
+            v.model = data.get('vehicle_model', v.model)
+            v.plate_number = data.get('plate_number', v.plate_number)
+            v.color = data.get('vehicle_color', v.color)
+            v.save()
+        driver.license_number = data.get('license_number', driver.license_number)
+        action = data.get('action')
+        if action == 'block':
+            driver.status = 'blocked'
+        elif action == 'activate':
+            driver.status = 'approved'
+        driver.save()
+        return Response(DriverProfileSerializer(driver).data)
+
+    if request.method == 'DELETE':
+        user = driver.user
+        if driver.vehicle:
+            driver.vehicle.delete()
+        driver.delete()
+        user.delete()
+        return Response({'detail': 'Haydovchi o\'chirildi.'}, status=204)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def taxi_park_stats_view(request):
+    """Park statistikasi: haydovchilar, safarlar, daromad."""
+    from rides.models import Ride, RideRequest
+    from django.db.models import Sum, Count
+    from datetime import timedelta
+
+    park = _get_park_from_token(request)
+    if not park:
+        return Response({'detail': 'Token yaroqsiz.'}, status=401)
+
+    drivers = Driver.objects.filter(taxi_park=park)
+    driver_ids = list(drivers.values_list('id', flat=True))
+
+    now = timezone.now()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # Jami safarlar
+    total_rides = Ride.objects.filter(driver_id__in=driver_ids, status='completed').count()
+    today_rides = Ride.objects.filter(driver_id__in=driver_ids, status='completed', completed_at__gte=today_start).count()
+
+    # Daromad
+    earnings = Ride.objects.filter(driver_id__in=driver_ids, status='completed').aggregate(
+        total=Sum('driver_earnings'), commission=Sum('commission_amount')
+    )
+
+    # So'nggi 7 kun statistikasi (grafiklar uchun)
+    daily_data = []
+    for i in range(6, -1, -1):
+        day_start = today_start - timedelta(days=i)
+        day_end = day_start + timedelta(days=1)
+        count = Ride.objects.filter(
+            driver_id__in=driver_ids, status='completed',
+            completed_at__gte=day_start, completed_at__lt=day_end
+        ).count()
+        income = Ride.objects.filter(
+            driver_id__in=driver_ids, status='completed',
+            completed_at__gte=day_start, completed_at__lt=day_end
+        ).aggregate(s=Sum('driver_earnings'))['s'] or 0
+        daily_data.append({
+            'date': day_start.strftime('%d.%m'),
+            'rides': count,
+            'income': int(income),
+        })
+
+    return Response({
+        'total_drivers': drivers.count(),
+        'online_drivers': drivers.filter(is_online=True).count(),
+        'approved_drivers': drivers.filter(status='approved').count(),
+        'pending_drivers': drivers.filter(status='pending').count(),
+        'total_rides': total_rides,
+        'today_rides': today_rides,
+        'total_earnings': int(earnings['total'] or 0),
+        'total_commission': int(earnings['commission'] or 0),
+        'daily': daily_data,
+    })

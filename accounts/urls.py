@@ -54,6 +54,13 @@ urlpatterns = [
     # Taksi park (public registration)
     path('taxi-park/register/', views.taxi_park_register_view, name='taxi-park-register'),
     path('taxi-park/list/', views.taxi_park_list_public_view, name='taxi-park-list-public'),
+    path('taxi-park/login/', views.taxi_park_login_view, name='taxi-park-login'),
+
+    # Taksi park o'z portali (token orqali)
+    path('taxi-park/me/', views.taxi_park_me_view, name='taxi-park-me'),
+    path('taxi-park/drivers/', views.taxi_park_drivers_view, name='taxi-park-drivers'),
+    path('taxi-park/drivers/<int:driver_id>/', views.taxi_park_driver_detail_view, name='taxi-park-driver-detail'),
+    path('taxi-park/stats/', views.taxi_park_stats_view, name='taxi-park-stats'),
 
     # Admin — Taksi parklar
     path('admin/taxi-parks/', views.AdminTaxiParkListView.as_view(), name='admin-taxi-parks'),
