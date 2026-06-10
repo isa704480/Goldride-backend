@@ -513,6 +513,13 @@ def register_driver_public_view(request):
     last_name = serializer.validated_data['last_name']
     license_number = serializer.validated_data['license_number']
     
+    # Optional: haydovchi o'zi tanlagan taksi parki
+    taxi_park_id = request.data.get('taxi_park_id')
+    selected_park = None
+    if taxi_park_id:
+        from .models import TaxiPark
+        selected_park = TaxiPark.objects.filter(id=taxi_park_id, status='approved').first()
+
     # Check if user already exists
     user, created = User.objects.get_or_create(
         phone=phone,
@@ -541,11 +548,15 @@ def register_driver_public_view(request):
             {'detail': 'Ushbu telefon raqami bilan haydovchi allaqachon ro\'yxatdan o\'tgan.'},
             status=status.HTTP_400_BAD_REQUEST
         )
-        
+
+    # Park tanlangan bo'lsa — park tasdiqlashini kutadi (pending_park_approval)
+    # Park tanlanmagan bo'lsa — admin tasdiqlashini kutadi (solo haydovchi)
     driver = Driver.objects.create(
         user=user,
         license_number=license_number,
-        status='pending'  # pending, so it appears in the admin panel!
+        status='pending',          # Admin yoki park tomonidan tasdiqlanishi kerak
+        taxi_park=selected_park,   # None bo'lsa — solo
+        intro_period_start=timezone.now(),
     )
     
     # Create the Vehicle
@@ -564,10 +575,12 @@ def register_driver_public_view(request):
     from accounts.models import Wallet
     Wallet.objects.get_or_create(user=user)
     
+    park_msg = f" '{selected_park.name}' taksi parkiga yuborildi." if selected_park else ''
     return Response(
-        {'detail': 'Muvaffaqiyatli ro\'yxatdan o\'tdingiz. Tez orada admin tasdiqlaydi.'},
+        {'detail': f'Muvaffaqiyatli ro\'yxatdan o\'tdingiz.{park_msg} Tez orada admin tasdiqlaydi.'},
         status=status.HTTP_201_CREATED
     )
+
 
 
 class DriverProfileView(generics.RetrieveUpdateAPIView):
@@ -1500,8 +1513,12 @@ def taxi_park_drivers_view(request):
         return Response({'detail': 'Token yaroqsiz.'}, status=401)
 
     if request.method == 'GET':
-        drivers = Driver.objects.filter(taxi_park=park).select_related('user', 'vehicle')
-        return Response(DriverProfileSerializer(drivers, many=True).data)
+        # status filter: ?status=approved|pending|blocked|all
+        status_filter = request.query_params.get('status')
+        drivers_qs = Driver.objects.filter(taxi_park=park).select_related('user', 'vehicle')
+        if status_filter and status_filter != 'all':
+            drivers_qs = drivers_qs.filter(status=status_filter)
+        return Response(DriverProfileSerializer(drivers_qs, many=True).data)
 
     # POST — yangi haydovchi
     from .models import Vehicle, Wallet
@@ -1536,6 +1553,60 @@ def taxi_park_drivers_view(request):
     wallet, _ = Wallet.objects.get_or_create(user=user)
     wallet.deposit(conf.DRIVER_BALANCE['SIGNUP_BONUS'], f"Kirish bonusi — {park.name}")
     return Response(DriverProfileSerializer(driver).data, status=201)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def taxi_park_pending_drivers_view(request):
+    """Park: saytdan o'tgan, ushbu parkni tanlagan va hali tasdiqlanmagan haydovchilar."""
+    park = _get_park_from_token(request)
+    if not park:
+        return Response({'detail': 'Token yaroqsiz.'}, status=401)
+
+    pending = Driver.objects.filter(
+        taxi_park=park, status='pending'
+    ).select_related('user', 'vehicle')
+    return Response(DriverProfileSerializer(pending, many=True).data)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def taxi_park_approve_driver_view(request, driver_id):
+    """Park: kutilayotgan haydovchini qabul qilish yoki rad etish."""
+    from .models import Wallet
+    from django.conf import settings as conf
+
+    park = _get_park_from_token(request)
+    if not park:
+        return Response({'detail': 'Token yaroqsiz.'}, status=401)
+
+    try:
+        driver = Driver.objects.get(id=driver_id, taxi_park=park, status='pending')
+    except Driver.DoesNotExist:
+        return Response({'detail': 'Haydovchi topilmadi yoki allaqachon tasdiqlangan.'}, status=404)
+
+    action = request.data.get('action')
+    if action == 'approve':
+        driver.status = 'approved'
+        driver.intro_period_start = timezone.now()   # 30 kunlik komissiya shu vaqtdan boshlanadi
+        driver.save(update_fields=['status', 'intro_period_start'])
+
+        # Kirish bonusini yuboring
+        bonus = getattr(conf, 'DRIVER_BALANCE', {}).get('SIGNUP_BONUS', 20000)
+        wallet, _ = Wallet.objects.get_or_create(user=driver.user)
+        wallet.deposit(bonus, f"Kirish bonusi — {park.name} tomonidan tasdiqlandi")
+
+        return Response({'status': 'approved', 'detail': f'{driver.user.get_full_name()} tasdiqlandi.'})
+    elif action == 'reject':
+        driver.status = 'rejected'
+        # Rad etilganda parkdan ajrating (solo bo'lib qoladi)
+        driver.taxi_park = None
+        driver.save(update_fields=['status', 'taxi_park'])
+        return Response({'status': 'rejected', 'detail': f'{driver.user.get_full_name()} rad etildi.'})
+    else:
+        return Response({'detail': "'action' maydoni: 'approve' yoki 'reject' bo'lishi kerak."}, status=400)
+
+
 
 
 @api_view(['GET', 'PUT', 'DELETE'])

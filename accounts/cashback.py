@@ -12,11 +12,15 @@ Do'st taklif qoidalari:
   - Bonuslar ERTANGI KUN tushadi (pending_referral_bonus orqali)
   - Referral bonusni kartaga yechish: 2% komissiya, min 1000 UZS qolishi kerak
 
-Haydovchi komissiya qoidalari:
-  - Kirish davri (dastlabki 15 ta yoki 48soat+8ta): 20% (elektro: 19%)
-  - Ertalab 07-09: 16% (elektro: 15%)
-  - Oddiy: settings.PRICING['COMMISSION_RATE'] (5%)
-  - Maqsad chegirmasi: commission_discount_rate % past
+Haydovchi komissiya qoidalari (YANGILANGAN):
+  Park haydovchilari uchun:
+    - Birinchi 30 kun (ro'yxatdan o'tgan kundan): 2% komissiya
+    - 30 kundan keyin: 1.5% komissiya
+  Solo haydovchilar uchun:
+    - Kirish davri (dastlabki 15 ta yoki 48soat+8ta): 20% (elektro: 19%)
+    - Ertalab 07-09: 16% (elektro: 15%)
+    - Oddiy: settings.PRICING['COMMISSION_RATE'] (5%)
+    - Maqsad chegirmasi: commission_discount_rate % past
 """
 
 import logging
@@ -193,21 +197,40 @@ INTRO_MAX_RIDES = 15       # Kirish davri tugash chegarasi (buyurtmalar)
 INTRO_HOURS     = 48       # Kirish davri tugash chegarasi (soat)
 INTRO_MIN_RIDES = 8        # 48 soatda minimal buyurtmalar soni
 
+# Taksi park komissiya qoidalari (yangi)
+PARK_COMMISSION_INTRO    = Decimal('0.02')    # 2% — birinchi 30 kun
+PARK_COMMISSION_REGULAR  = Decimal('0.015')   # 1.5% — 30 kundan keyin
+PARK_INTRO_DAYS          = 30                 # Kirish davri (kun)
+
 
 def get_driver_commission_rate(driver) -> Decimal:
     """
     Haydovchiga qo'llaniladigan joriy komissiya stavkasini hisoblash.
 
-    Ustuvorlik tartibi:
-    1. Kirish davri (intro) — 20%/19%
-    2. Ertalabki soatlar (happy hours) — 16%/15%
-    3. Maqsad chegirmasi (goal discount) — asosiy stavkadan chegirma
-    4. Oddiy stavka (settings dan)
+    Park haydovchilariga YANGI qoida:
+      - Birinchi 30 kun: 2%
+      - 30 kundan keyin: 1.5%
+
+    Solo haydovchilarga ESKI qoida (ustuvorlik tartibi):
+      1. Kirish davri (intro) — 20%/19%
+      2. Ertalabki soatlar (happy hours) — 16%/15%
+      3. Maqsad chegirmasi (goal discount) — asosiy stavkadan chegirma
+      4. Oddiy stavka (settings dan)
     """
     now = timezone.now()
     car_class = getattr(getattr(driver, 'vehicle', None), 'car_class', 'economy')
     is_electro = car_class == 'electro'
 
+    # ── PARK HAYDOVCHISI: soddalashtirilgan 30-kun qoidasi ──────────────────
+    if driver.taxi_park_id:
+        join_date = driver.intro_period_start or driver.created_at
+        if join_date:
+            days_since = (now - join_date).days
+            if days_since < PARK_INTRO_DAYS:
+                return PARK_COMMISSION_INTRO     # 2%
+        return PARK_COMMISSION_REGULAR           # 1.5%
+
+    # ── SOLO HAYDOVCHI: eski murakkab qoida ────────────────────────────────
     # 1. Kirish davri tekshiruvi
     if not driver.intro_period_completed:
         completed_rides = driver.total_rides_completed or 0
