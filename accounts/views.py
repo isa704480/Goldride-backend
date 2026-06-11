@@ -1265,7 +1265,7 @@ def taxi_park_register_view(request):
     """Yangi taksi parkini ro'yxatdan o'tkazish (saytdan)."""
     from .models import TaxiPark
     data = request.data
-    required = ['name', 'phone', 'contact_person']
+    required = ['name', 'phone', 'contact_person', 'password']
     for field in required:
         if not data.get(field):
             return Response({'detail': f'{field} majburiy.'}, status=400)
@@ -1280,12 +1280,22 @@ def taxi_park_register_view(request):
         address=data.get('address', ''),
         inn=data.get('inn', ''),
         description=data.get('description', ''),
+        password=data['password'],
         status='pending',
     )
     logger.info("Yangi taksi park: %s (%s)", park.name, park.phone)
     return Response({
-        'detail': 'Ro\'yxatdan o\'tdingiz. Admin tasdiqlaganidan keyin xabardor qilamiz.',
-        'park_id': park.id,
+        'detail': 'Muvaffaqiyatli ro\'yxatdan o\'tdingiz.',
+        'token': park.api_token,
+        'park': {
+            'id': park.id,
+            'name': park.name,
+            'phone': park.phone,
+            'contact_person': park.contact_person,
+            'address': park.address,
+            'driver_count': park.driver_count,
+            'status': park.status,
+        }
     }, status=201)
 
 
@@ -1450,7 +1460,8 @@ def _get_park_from_token(request):
         token = auth[7:]
     if not token:
         return None
-    return TaxiPark.objects.filter(api_token=token, status='approved').first()
+    # Ruxsat etilgan statuslar: approved va pending
+    return TaxiPark.objects.filter(api_token=token, status__in=['approved', 'pending']).first()
 
 
 @api_view(['POST'])
@@ -1466,15 +1477,17 @@ def taxi_park_login_view(request):
     park = TaxiPark.objects.filter(phone=phone).first()
     if not park:
         return Response({'detail': 'Park topilmadi.'}, status=401)
-    if park.status == 'pending':
-        return Response({'detail': 'Parkingiz hali tasdiqlanmagan. Admin tasdiqlashini kuting.'}, status=403)
+    
+    # Parolni tekshirish
+    if park.password:
+        if password != park.password:
+            return Response({'detail': 'Noto\'g\'ri parol.'}, status=401)
+    else:
+        if not (password == park.api_token[:8] or password == park.api_token):
+            return Response({'detail': 'Noto\'g\'ri parol.'}, status=401)
+
     if park.status in ('rejected', 'blocked'):
         return Response({'detail': f'Parkingiz {park.get_status_display()}. Admin bilan bog\'laning.'}, status=403)
-
-    # Parol — parkni ro'yxatdan o'tkazganda o'rnatilgan (API token = parol sifatida ishlatiladi yoki alohida parol)
-    # Soddalik uchun: parol = api_token ning dastlabki 8 belgisi
-    if not (password == park.api_token[:8] or password == park.api_token):
-        return Response({'detail': 'Noto\'g\'ri parol.'}, status=401)
 
     return Response({
         'token': park.api_token,

@@ -212,6 +212,7 @@ class TaxiPark(models.Model):
 
     # API kirish uchun token (park o'z haydovchilarini boshqaradi)
     api_token = models.CharField(max_length=64, unique=True, blank=True, verbose_name='API token')
+    password = models.CharField(max_length=128, blank=True, verbose_name='Parol')
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
