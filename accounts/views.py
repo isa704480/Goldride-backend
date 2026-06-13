@@ -10,7 +10,7 @@ from django.contrib.auth import get_user_model
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from .models import Driver, SavedLocation, User
-from .otp import send_otp, verify_otp, get_otp_ttl, can_send_otp
+from .otp import send_otp, verify_otp, get_otp_ttl, can_send_otp, record_otp_sent
 from .serializers import (
     SendOTPSerializer,
     VerifyOTPSerializer,
@@ -31,75 +31,14 @@ logger = logging.getLogger('accounts')
 User = get_user_model()
 
 
-@swagger_auto_schema(
-    method='post',
-    tags=['Auth'],
-    operation_summary='OTP yuborish',
-    operation_description='Telefon raqam yoki emailga OTP kodi yuboradi.',
-    request_body=openapi.Schema(
-        type=openapi.TYPE_OBJECT,
-        properties={
-            'phone': openapi.Schema(type=openapi.TYPE_STRING, example='+998901234567'),
-            'email': openapi.Schema(type=openapi.TYPE_STRING, example='user@example.com'),
-        },
-    ),
-    responses={
-        200: openapi.Response('OTP yuborildi', openapi.Schema(
-            type=openapi.TYPE_OBJECT,
-            properties={'detail': openapi.Schema(type=openapi.TYPE_STRING)},
-        )),
-        429: 'Juda ko\'p urinish',
-    }
-)
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def send_otp_view(request):
-    """OTP yuborish — telefon yoki email."""
-    phone = request.data.get('phone')
-    email = request.data.get('email')
-
-    if not phone and not email:
-        return Response({'detail': 'Telefon raqami yoki email kiritish shart.'}, status=400)
-
-    identifier = email if email else phone
-
-    # Brute-force va rate-limit tekshiruvi
-    allowed, reason = can_send_otp(identifier)
-    if not allowed:
-        logger.warning("OTP yuborishda rad etildi: %s — %s", identifier, reason)
-        return Response({'detail': reason}, status=status.HTTP_429_TOO_MANY_REQUESTS)
-
-    # Generate and store OTP
-    from .otp import generate_otp, store_otp
-    otp = generate_otp()
-    store_otp(identifier, otp)
-    
-    # If phone is also provided, store it in cache linked to this identifier
-    if phone and email:
-        from django.core.cache import cache
-        cache.set(f"otp_phone:{identifier}", phone, 600) # 10 mins
-
-    from .sms import get_otp_provider
-    if email:
-        # Explicitly use Email Provider
-        from .sms import EmailProvider
-        provider = EmailProvider()
-        message = f"Goldride: Tasdiqlash kodingiz: {otp}"
-        provider.send_sms(email, message)
-    else:
-        provider = get_otp_provider()
-        message = f"Goldride: Tasdiqlash kodingiz: {otp}"
-        provider.send_sms(phone, message)
-
-    response_data = {
-        'detail': f'Kod {email if email else phone} manziliga yuborildi.',
-        'expires_in': 300,
-    }
-
-    if settings.DEBUG:
-        response_data['otp'] = otp
-
-    return Response(response_data, status=status.HTTP_200_OK)
+    """OTP yuborish BEKOR QILINDI — faqat Google bilan kirish ishlatiladi."""
+    return Response(
+        {'detail': 'OTP yuborish bekor qilindi. Goldride Google bilan kirishnigina ishlatadi.'},
+        status=410
+    )
 
 
 def is_name_weird(name):
@@ -147,82 +86,11 @@ def is_name_weird(name):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def verify_otp_view(request):
-    """
-    Smart Verification:
-    1. Verifies Code.
-    2. Checks for existing user.
-    3. If new/incomplete, returns next_steps (phone, name, etc.)
-    """
-    phone = request.data.get('phone')
-    email = request.data.get('email')
-    tg_username = request.data.get('telegram_username')
-    otp = request.data.get('otp')
-    tg_login = request.data.get('tg_login', False)
-
-    # --- TELEGRAM 6 xonali OTP flow ---
-    if tg_login and phone and otp:
-        from accounts.models import TelegramOTP
-        if not phone.startswith('+'): phone = '+' + phone
-
-        # DB dan tekshirish (cache emas — process izolyatsiyasi muammosi yo'q)
-        otp_entry = TelegramOTP.verify(phone, str(otp))
-        if not otp_entry:
-            logger.warning("Telegram OTP xato: %s", phone)
-            return Response({'detail': 'Kod noto\'g\'ri yoki muddati o\'tgan.'}, status=400)
-
-        chat_id = otp_entry.chat_id
-
-        user = User.objects.filter(phone=phone).first()
-        device_id = request.data.get('device_id')
-        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-        ip = x_forwarded_for.split(',')[0] if x_forwarded_for else request.META.get('REMOTE_ADDR')
-
-        if user:
-            if chat_id:
-                user.telegram_chat_id = chat_id
-            user.device_id = device_id
-            user.last_ip = ip
-            user.save(update_fields=['telegram_chat_id', 'device_id', 'last_ip'])
-            if user.is_blocked:
-                return Response({'detail': 'Sizning akkauntingiz bloklangan.'}, status=403)
-            refresh = RefreshToken.for_user(user)
-            return Response({
-                'status': 'ok',
-                'access': str(refresh.access_token),
-                'refresh': str(refresh),
-                'user': UserProfileSerializer(user).data,
-            })
-
-        # New user via Telegram — ask for name
-        return Response({
-            'detail': 'Profilni yakunlash kerak.',
-            'status': 'partial',
-            'missing_fields': ['first_name', 'last_name'],
-            'prefill': {'phone': phone}
-        }, status=200)
-
-    identifier = email if email else (phone or tg_username)
-
-    if not identifier or not otp:
-        return Response({'detail': 'Ma\'lumotlar yetarli emas.'}, status=400)
-
-    if not verify_otp(identifier, otp):
-        return Response({'detail': 'Noto\'g\'ri yoki muddati o\'tgan kod.'}, status=400)
-
-    # If email was used for OTP, check if we had a linked phone
-    if email and not phone:
-        from django.core.cache import cache
-        phone = cache.get(f"otp_phone:{email}")
-
-    # Find user
-    user = None
-    if phone:
-        if not phone.startswith('+'): phone = '+' + phone
-        user = User.objects.filter(phone=phone).first()
-    elif email:
-        user = User.objects.filter(email=email).first()
-    elif tg_username:
-        user = User.objects.filter(telegram_chat_id=str(tg_username)).first()
+    """OTP tasdiqlash BEKOR QILINDI — faqat Google bilan kirish ishlatiladi."""
+    return Response(
+        {'detail': 'OTP orqali kirish bekor qilindi. Goldride faqat Google bilan kirishnigina ishlatadi.'},
+        status=410
+    )
     
     # --- ANTI-FRAUD CHECK ---
     device_id = request.data.get('device_id')
@@ -366,63 +234,17 @@ def admin_login_view(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def login_direct_view(request):
-    """Direct login/registration via phone number (skipping OTP)."""
-    serializer = SendOTPSerializer(data=request.data)
-    serializer.is_valid(raise_exception=True)
-    phone = serializer.validated_data['phone']
+    """
+    XAVFSIZLIK: OTPsiz to'g'ridan-to'g'ri kirish O'CHIRILDI.
 
-    if phone and not phone.startswith('+'):
-        phone = '+' + phone
-
-    # Get or create user
-    ref_code = request.data.get('referral_code')
-    user, created = User.objects.get_or_create(
-        phone=phone,
-        defaults={
-            'username': phone, 
-            'is_verified': True
-        }
+    Avval bu endpoint faqat telefon raqam asosida JWT token berardi —
+    istalgan odam istalgan raqam bilan kira olardi (autentifikatsiya bypass'i).
+    Endi barcha kirish `send-otp` + `verify-otp` orqali amalga oshiriladi.
+    """
+    return Response(
+        {'detail': 'Bu usul o\'chirilgan. Iltimos, OTP orqali kiring.'},
+        status=status.HTTP_410_GONE,
     )
-
-    if created and ref_code:
-        if user.bonus_balance is None:
-            user.bonus_balance = Decimal('0')
-        user.bonus_balance += Decimal('10000')
-        user.save(update_fields=['bonus_balance'])
-        
-        referrer = User.objects.filter(referral_code=ref_code).first()
-        if referrer:
-            user.referred_by = referrer
-            user.save(update_fields=['referred_by'])
-
-    # Bonus logic moved to where profile is completed
-    pass
-
-    if created and ref_code:
-        try:
-            from rides.models import ReferralBonus
-            referrer = User.objects.get(referral_code=ref_code)
-            user.referred_by = referrer
-            user.save()
-            ReferralBonus.objects.create(user=referrer, referred_user=user, amount=10000, is_paid=True)
-            referrer.add_gold_points(10)
-            user.add_gold_points(5)
-        except User.DoesNotExist:
-            pass
-
-    if not user.is_verified:
-        user.is_verified = True
-        user.save()
-
-    # Generate JWT tokens
-    refresh = RefreshToken.for_user(user)
-
-    return Response({
-        'access': str(refresh.access_token),
-        'refresh': str(refresh),
-        'is_new_user': created,
-        'user': UserProfileSerializer(user).data,
-    })
 
 
 @api_view(['POST'])
@@ -947,115 +769,77 @@ def get_wallet_view(request):
     return Response(serializer.data)
 
 
-def _tg_send(token, chat_id, text, parse_mode='HTML', reply_markup=None):
-    """Telegram ga xabar yuborish — helper."""
-    import requests as req_lib
-    import json
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    data = {'chat_id': chat_id, 'text': text, 'parse_mode': parse_mode}
-    if reply_markup:
-        data['reply_markup'] = json.dumps(reply_markup)
-    try:
-        req_lib.post(url, data=data, timeout=8)
-    except Exception as e:
-        logger.error("Telegram xabar yuborishda xatolik: %s", e)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def referral_earnings_view(request):
+    """Referal daromadlar: kimdan qancha bonus tushgani (alohida balans)."""
+    from .models import ReferralEarning
+    from .serializers import ReferralEarningSerializer
 
-
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def telegram_webhook(request):
-    """
-    Telegram Bot Webhook — polling emas, Telegram o'zi POST yuboradi.
-
-    Polling (`run_bot`) Railway'da 409 Conflict beradi — bir nechta instance.
-    Webhook bilan bu muammo yo'q: Telegram faqat bizning serverga yuboradi.
-
-    Ro'yxatdan o'tish: start.sh da webhook registratsiyasi qilinadi.
-    """
-    token = settings.TELEGRAM_BOT_TOKEN
-    if not token:
-        return Response({'status': 'no_token'}, status=200)
-
-    data = request.data
-    message = data.get('message', {})
-    if not message:
-        return Response({'status': 'ok'}, status=200)
-
-    chat_id = message.get('chat', {}).get('id')
-    text = message.get('text', '')
-    contact = message.get('contact')
-
-    if not chat_id:
-        return Response({'status': 'ok'}, status=200)
-
-    if text == '/start':
-        welcome = (
-            "🚕 <b>Goldride</b> botiga xush kelibsiz!\n\n"
-            "📱 Tizimga kirish uchun telefon raqamingizni yuboring.\n"
-            "Sizga 6 xonali tasdiqlash kodi yuboriladi."
-        )
-        reply_markup = {
-            'keyboard': [[{'text': '📱 Telefon raqamni yuborish', 'request_contact': True}]],
-            'resize_keyboard': True,
-            'one_time_keyboard': True,
-        }
-        _tg_send(token, chat_id, welcome, reply_markup=reply_markup)
-
-    elif contact:
-        from .models import TelegramOTP
-        phone = contact.get('phone_number', '')
-        if not phone.startswith('+'):
-            phone = '+' + phone
-
-        otp_entry = TelegramOTP.create_otp(phone, chat_id=chat_id)
-        otp = otp_entry.otp
-
-        user = User.objects.filter(phone=phone).first()
-        if user:
-            msg = (
-                f"✅ <b>Akkauntingiz topildi!</b>\n\n"
-                f"Ilovaga kirish uchun kodni kiriting:\n\n"
-                f"🔑 <b>{otp}</b>\n\n"
-                f"⏱ Kod 5 daqiqa amal qiladi."
-            )
-        else:
-            msg = (
-                f"📱 Telefon: <code>{phone}</code>\n\n"
-                f"Ilovaga kirish kodi:\n\n"
-                f"🔑 <b>{otp}</b>\n\n"
-                f"⏱ Kod 5 daqiqa amal qiladi.\n\n"
-                f"❗ Yangi foydalanuvchi — ilovada ro'yxatdan o'ting."
-            )
-
-        _tg_send(token, chat_id, msg)
-        logger.info("Telegram OTP yuborildi: %s (webhook)", phone)
-
-    else:
-        _tg_send(token, chat_id, "Iltimos, pastdagi tugmani bosib telefon raqamingizni yuboring.")
-
-    return Response({'status': 'ok'}, status=200)
+    earnings = ReferralEarning.objects.filter(user=request.user).select_related('from_user')[:100]
+    total = sum((e.amount for e in earnings), Decimal('0'))
+    return Response({
+        'referral_balance': request.user.referral_balance,
+        'pending_referral_bonus': request.user.pending_referral_bonus,
+        'bonus_balance': request.user.bonus_balance,   # o'z keshbegi (alohida)
+        'total_earned': total,
+        'earnings': ReferralEarningSerializer(earnings, many=True).data,
+    })
 
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def google_auth_view(request):
     """
-    Handle Google OAuth callback/token.
-    Requires: email, first_name, last_name, and then asks for phone.
+    Google (Firebase) bilan kirish.
+
+    XAVFSIZLIK: Avval bu endpoint faqat `email` qabul qilib token berardi —
+    jabrlanuvchining emailini bilgan har kim uning hisobiga kira olardi.
+    Endi mijoz Firebase'dan olingan `id_token` ni yuborishi SHART; server uni
+    Firebase Admin SDK orqali tekshiradi va email'ni token ichidan oladi.
     """
-    email = request.data.get('email')
-    first_name = request.data.get('first_name', '')
-    last_name = request.data.get('last_name', '')
-    phone = request.data.get('phone') # Might be empty if it's the first step
+    from .utils import verify_firebase_id_token
 
+    id_token = request.data.get('id_token')
+    if not id_token:
+        return Response({'detail': 'id_token shart.'}, status=400)
+
+    decoded, error = verify_firebase_id_token(id_token)
+    if error == 'not_configured':
+        return Response(
+            {'detail': 'Google bilan kirish hozircha sozlanmagan.'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    if not decoded:
+        return Response({'detail': 'Google tokeni yaroqsiz.'}, status=401)
+
+    # Email va ism faqat ISHONCHLI tarzda token ichidan olinadi
+    email = decoded.get('email')
     if not email:
-        return Response({'detail': 'Email shart.'}, status=400)
+        return Response({'detail': 'Google hisobida email topilmadi.'}, status=400)
 
-    # Try to find user by email or phone
+    full_name = decoded.get('name', '') or ''
+    name_parts = full_name.split(' ', 1)
+    first_name = name_parts[0] if name_parts else ''
+    last_name = name_parts[1] if len(name_parts) > 1 else ''
+    phone = request.data.get('phone')
+
+    # Yangi foydalanuvchi uchun telefon MAJBURIY
     user = User.objects.filter(email=email).first()
-    
-    if not user and phone:
-        # If we have phone, we can create the user
+
+    if not user:
+        if not phone:
+            return Response({
+                'detail': 'Telefon raqami shart — ro\'yxatdan o\'tish uchun kiritish kerak.',
+                'email': email,
+                'first_name': first_name,
+                'last_name': last_name
+            }, status=400)
+
+        if not phone.startswith('+'):
+            phone = '+' + phone
+
+        # Yangi foydalanuvchi yaratish
         user, created = User.objects.get_or_create(
             phone=phone,
             defaults={
@@ -1070,15 +854,7 @@ def google_auth_view(request):
             from accounts.models import Wallet
             wallet, _ = Wallet.objects.get_or_create(user=user)
             wallet.deposit(20000, "Xush kelibsiz (Google orqali)")
-    
-    if not user:
-        return Response({
-            'detail': 'Ro\'yxatdan o\'tish uchun telefon raqami kerak.',
-            'step': 'provide_phone',
-            'email': email,
-            'first_name': first_name,
-            'last_name': last_name
-        }, status=200)
+            logger.info("Yangi foydalanuvchi Google orqali: %s", phone)
 
     refresh = RefreshToken.for_user(user)
     return Response({
@@ -1273,16 +1049,17 @@ def taxi_park_register_view(request):
     if TaxiPark.objects.filter(phone=data['phone']).exists():
         return Response({'detail': 'Bu telefon raqam allaqachon ro\'yxatdan o\'tgan.'}, status=400)
 
-    park = TaxiPark.objects.create(
+    park = TaxiPark(
         name=data['name'],
         phone=data['phone'],
         contact_person=data['contact_person'],
         address=data.get('address', ''),
         inn=data.get('inn', ''),
         description=data.get('description', ''),
-        password=data['password'],
         status='pending',
     )
+    park.set_password(data['password'])  # hash qilib saqlanadi
+    park.save()
     logger.info("Yangi taksi park: %s (%s)", park.name, park.phone)
     return Response({
         'detail': 'Muvaffaqiyatli ro\'yxatdan o\'tdingiz.',
@@ -1477,12 +1254,13 @@ def taxi_park_login_view(request):
     park = TaxiPark.objects.filter(phone=phone).first()
     if not park:
         return Response({'detail': 'Park topilmadi.'}, status=401)
-    
-    # Parolni tekshirish
+
+    # Parolni tekshirish (hash bilan; eski ochiq parollar avtomatik migratsiya qilinadi)
     if park.password:
-        if password != park.password:
+        if not park.check_password(password):
             return Response({'detail': 'Noto\'g\'ri parol.'}, status=401)
     else:
+        # Parol o'rnatilmagan eski parklar uchun token bo'yicha vaqtinchalik kirish
         if not (password == park.api_token[:8] or password == park.api_token):
             return Response({'detail': 'Noto\'g\'ri parol.'}, status=401)
 

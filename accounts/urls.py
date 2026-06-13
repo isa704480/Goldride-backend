@@ -9,7 +9,6 @@ urlpatterns = [
     path('login-direct/', views.login_direct_view, name='login-direct'),
     path('admin/login/', views.admin_login_view, name='admin-login'),
     path('token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),
-    path('telegram/webhook/', views.telegram_webhook, name='telegram-webhook'),
     path('auth/google/', views.google_auth_view, name='google-auth'),
 
     # Registration
@@ -50,6 +49,7 @@ urlpatterns = [
 
     # Referral bonus withdrawal
     path('wallet/withdraw-referral/', views.withdraw_referral_view, name='wallet-withdraw-referral'),
+    path('referral/earnings/', views.referral_earnings_view, name='referral-earnings'),
 
     # Taksi park (public registration)
     path('taxi-park/register/', views.taxi_park_register_view, name='taxi-park-register'),
