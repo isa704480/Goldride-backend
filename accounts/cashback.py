@@ -65,28 +65,23 @@ def get_passenger_cashback_rate(user, payment_method: str) -> Decimal:
 def apply_passenger_cashback(user, fare: Decimal, payment_method: str) -> Decimal:
     """
     Safardan keyin mijozga keshbek yozish.
+
+    Keshbek `bonus_balance` ga tushadi (safar to'lovida ishlatish uchun, max 70%,
+    6-safardan boshlab) — referal balansi bilan ARALASHMAYDI.
     Qaytarish: yozilgan keshbek miqdori.
     """
-    from accounts.models import Wallet, WalletTransaction
-
     rate = get_passenger_cashback_rate(user, payment_method)
     cashback = (fare * rate).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
 
     if cashback <= 0:
         return Decimal('0')
 
+    user.bonus_balance = (user.bonus_balance or Decimal('0')) + cashback
+    user.save(update_fields=['bonus_balance'])
+
     ride_num = (user.total_passenger_rides or 0) + 1
-    label = f"1-{INTRO_RIDE_LIMIT}-safar" if ride_num <= INTRO_RIDE_LIMIT else "Doimiy"
-    desc = (
-        f"Keshbek: {int(rate * 100)}% ({label}, "
-        f"{'Karta' if payment_method == 'card' else 'Naqd'}) — {ride_num}-safar"
-    )
-
-    wallet, _ = Wallet.objects.get_or_create(user=user)
-    wallet.deposit(cashback, desc)
-
     logger.info(
-        "Keshbek: %s → %d UZS (%.0f%%, %d-safar, %s)",
+        "Keshbek (bonus_balance): %s → %d UZS (%.0f%%, %d-safar, %s)",
         user.phone, cashback, rate * 100, ride_num, payment_method
     )
     return cashback
@@ -100,9 +95,18 @@ def is_bonus_usable(user) -> bool:
 def queue_referral_bonus(referrer, passenger, fare: Decimal, payment_method: str):
     """
     Do'stining safaridan referral bonusni ERTAGA uchun navbatga qo'yish.
-    pending_referral_bonus maydoniga yoziladi, har kuni cronjob to'liq hamyonga o'tkazadi.
+    pending_referral_bonus ga yoziladi; har bir hodisa ReferralEarning'ga
+    log qilinadi ("kimdan qancha"). Cron flush_pending_referral_bonuses orqali
+    referral_balance ga o'tkaziladi.
     """
-    rate = REFERRAL_BONUS_CARD if payment_method == 'card' else REFERRAL_BONUS_CASH
+    from accounts.models import ReferralEarning
+
+    rides_count = (passenger.referral_rides_count or 0) + 1
+    if rides_count <= 10:
+        rate = Decimal('0.05')
+    else:
+        rate = REFERRAL_BONUS_CARD if payment_method == 'card' else REFERRAL_BONUS_CASH
+        
     bonus = (fare * rate).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
 
     if bonus <= 0:
@@ -110,6 +114,15 @@ def queue_referral_bonus(referrer, passenger, fare: Decimal, payment_method: str
 
     referrer.pending_referral_bonus = (referrer.pending_referral_bonus or Decimal('0')) + bonus
     referrer.save(update_fields=['pending_referral_bonus'])
+
+    ReferralEarning.objects.create(
+        user=referrer,
+        from_user=passenger,
+        amount=bonus,
+        source='passenger',
+        payment_method=payment_method,
+        is_credited=False,
+    )
 
     logger.info(
         "Referral bonus navbatga qo'shildi: %s ← %s dan %d UZS (ertaga tushadi)",
@@ -120,47 +133,57 @@ def queue_referral_bonus(referrer, passenger, fare: Decimal, payment_method: str
 def flush_pending_referral_bonuses():
     """
     Har kuni ertalab ishga tushiriladi (Celery/cron).
-    pending_referral_bonus > 0 bo'lgan foydalanuvchilarning bonusini hamyonga o'tkazadi.
+    pending_referral_bonus > 0 bo'lgan foydalanuvchilarning bonusini
+    referral_balance ga o'tkazadi (hamyon/keshbek bilan aralashmaydi).
     """
-    from accounts.models import User, Wallet
+    from accounts.models import User, ReferralEarning
+    from django.db import transaction
 
     users = User.objects.filter(pending_referral_bonus__gt=0)
     total_paid = 0
     for user in users:
-        amount = user.pending_referral_bonus
-        wallet, _ = Wallet.objects.get_or_create(user=user)
-        wallet.deposit(amount, "Do'stlardan referral bonus (kechagi safarlar)")
-        user.pending_referral_bonus = Decimal('0')
-        user.save(update_fields=['pending_referral_bonus'])
+        with transaction.atomic():
+            amount = user.pending_referral_bonus
+            user.referral_balance = (user.referral_balance or Decimal('0')) + amount
+            user.pending_referral_bonus = Decimal('0')
+            user.save(update_fields=['referral_balance', 'pending_referral_bonus'])
+            ReferralEarning.objects.filter(user=user, is_credited=False).update(is_credited=True)
         total_paid += 1
 
-    logger.info("Referral bonuslar to'landi: %d foydalanuvchi", total_paid)
+    logger.info("Referral bonuslar referral_balance ga o'tkazildi: %d foydalanuvchi", total_paid)
     return total_paid
 
 
 def withdraw_referral_bonus(user, amount: Decimal) -> tuple[bool, str]:
     """
-    Referral bonusni kartaga yechib olish.
-    Shartlar: 2% komissiya, yechib olgandan keyin min 1000 UZS qolishi kerak.
+    Referral balansni kartaga (hamyonga) yechib olish.
+    Shartlar: 2% komissiya, yechib olgandan keyin referral_balance'da min 1000 UZS qolishi kerak.
     """
     from accounts.models import Wallet
-
-    wallet, _ = Wallet.objects.get_or_create(user=user)
-    current = wallet.balance
+    from django.db import transaction
 
     commission = (amount * REFERRAL_WITHDRAWAL_FEE).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
     total_deduct = amount + commission
 
-    if current - total_deduct < REFERRAL_MIN_BALANCE:
-        needed = total_deduct + REFERRAL_MIN_BALANCE
-        return False, (
-            f"Yetarli balans yo'q. Yechish uchun hisobingizda kamida "
-            f"{int(needed):,} UZS bo'lishi kerak (Minimal qoldiq: {int(REFERRAL_MIN_BALANCE):,} UZS)."
-        )
+    with transaction.atomic():
+        u = type(user).objects.select_for_update().get(pk=user.pk)
+        current = u.referral_balance or Decimal('0')
 
-    wallet.withdraw(amount, f"Referral bonus yechish: {int(amount):,} UZS")
-    wallet.withdraw(commission, f"Yechish komissiyasi (2%): {int(commission):,} UZS")
-    return True, f"{int(amount):,} UZS muvaffaqiyatli yechildi (komissiya: {int(commission):,} UZS)"
+        if current - total_deduct < REFERRAL_MIN_BALANCE:
+            needed = total_deduct + REFERRAL_MIN_BALANCE
+            return False, (
+                f"Yetarli referal balans yo'q. Yechish uchun referal balansingizda kamida "
+                f"{int(needed):,} UZS bo'lishi kerak (Minimal qoldiq: {int(REFERRAL_MIN_BALANCE):,} UZS)."
+            )
+
+        # Referal balansdan yechib, sof miqdorni hamyonga (kartaga) o'tkazamiz
+        u.referral_balance = current - total_deduct
+        u.save(update_fields=['referral_balance'])
+
+        wallet, _ = Wallet.objects.get_or_create(user=u)
+        wallet.deposit(amount, f"Referal bonus yechildi: {int(amount):,} UZS (komissiya {int(commission):,})")
+
+    return True, f"{int(amount):,} UZS hamyoningizga o'tkazildi (komissiya: {int(commission):,} UZS)"
 
 
 def queue_driver_referral_bonus(referring_driver, fare: Decimal):
@@ -169,6 +192,8 @@ def queue_driver_referral_bonus(referring_driver, fare: Decimal):
     yangi haydovchi va yo'lovchining har safaridan 0.5% bonus.
     Bonus pending_referral_bonus orqali ertaga tushadi.
     """
+    from accounts.models import ReferralEarning
+
     bonus = (fare * DRIVER_REFERRAL_RATE).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
     if bonus <= 0:
         return
@@ -177,6 +202,15 @@ def queue_driver_referral_bonus(referring_driver, fare: Decimal):
         referring_driver.user.pending_referral_bonus or Decimal('0')
     ) + bonus
     referring_driver.user.save(update_fields=['pending_referral_bonus'])
+
+    ReferralEarning.objects.create(
+        user=referring_driver.user,
+        from_user=None,
+        amount=bonus,
+        source='driver',
+        payment_method='',
+        is_credited=False,
+    )
 
     logger.info(
         "Haydovchi referal bonus: %s → %d UZS (ertaga tushadi)",

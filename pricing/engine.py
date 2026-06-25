@@ -158,10 +158,12 @@ def calculate_price(
     duration_min = estimate_duration_minutes(distance_km)
     price = r['base'] + (distance_km * r['km']) + (duration_min * r['per_min'])
 
-    # 2. Hamrohlik chegirmasi
+    # 2. Hamrohlik chegirmasi (3 bosqichli)
     if share_type != 'solo' and partners_found:
         discount = r['disc_1'] if share_type == 'shared_1' else r['disc_2']
-        if shared_distance_ratio < 0.5:
+        if shared_distance_ratio < 0.3:
+            discount = 0.0
+        elif shared_distance_ratio < 0.6:
             discount /= 2
         price *= (1 - discount)
 

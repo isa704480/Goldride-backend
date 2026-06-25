@@ -119,6 +119,14 @@ class User(AbstractUser):
         default=0,
         verbose_name='Kutilayotgan referal bonus (UZS)'
     )
+    # Referal balansi — do'stlar safaridan tushgan bonus. O'z keshbegidan (bonus_balance)
+    # ALOHIDA turadi va faqat shu balans kartaga yechib olinadi.
+    referral_balance = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        verbose_name='Referal balansi (yechib olinadigan, UZS)'
+    )
     bank_account_id = models.CharField(
         max_length=50,
         unique=True,
@@ -151,8 +159,8 @@ class User(AbstractUser):
     )
 
     def add_gold_points(self, points):
-        """Helper to add points safely."""
-        self.gold_points += points
+        """GoldPoints qo'shish (xavfsiz)."""
+        self.gold_points = (self.gold_points or 0) + points
         self.save(update_fields=['gold_points'])
 
     # Use phone as the login field
@@ -176,11 +184,6 @@ class User(AbstractUser):
         if not self.referral_code:
             self.referral_code = f"GOLD{self.id_number}"
             self.save(update_fields=['referral_code'])
-
-    def add_gold_points(self, amount):
-        """Adds GoldPoints to user balance."""
-        self.gold_points += amount
-        self.save(update_fields=['gold_points'])
 
     class Meta:
         verbose_name = 'Foydalanuvchi'
@@ -230,6 +233,27 @@ class TaxiPark(models.Model):
             import secrets
             self.api_token = secrets.token_hex(32)
         super().save(*args, **kwargs)
+
+    def set_password(self, raw_password):
+        """Parolni xavfsiz hash qilib saqlash."""
+        from django.contrib.auth.hashers import make_password
+        self.password = make_password(raw_password)
+
+    def check_password(self, raw_password):
+        """Parolni tekshirish. Eski (hashlanmagan) parollar bilan ham mos ishlaydi."""
+        from django.contrib.auth.hashers import check_password, identify_hasher
+        if not self.password:
+            return False
+        try:
+            identify_hasher(self.password)
+        except ValueError:
+            # Eski ochiq matnli parol — bir martalik solishtirish va keyin hash qilish
+            if self.password == raw_password:
+                self.set_password(raw_password)
+                self.save(update_fields=['password'])
+                return True
+            return False
+        return check_password(raw_password, self.password)
 
     @property
     def driver_count(self):
@@ -771,18 +795,14 @@ class Wallet(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def deposit(self, amount, description='Hisobni to\'ldirish'):
+        # GoldPoints bu yerda QO'SHILMAYDI — aks holda safar mukofoti
+        # (_finalize_ride) bilan ikki marta hisoblanardi. Ballar faqat
+        # aniq belgilangan joylarda (safar/top-up) add_gold_points orqali beriladi.
         from django.db import transaction
         with transaction.atomic():
             wallet = Wallet.objects.select_for_update().get(pk=self.pk)
             wallet.balance += amount
             wallet.save()
-            
-            # Automatic GoldPoints: 1000 UZS = 1 Ball
-            points = int(amount / 1000)
-            if points > 0:
-                user = User.objects.select_for_update().get(pk=wallet.user.pk)
-                user.gold_points += points
-                user.save()
 
             WalletTransaction.objects.create(
                 wallet=wallet,
@@ -794,11 +814,11 @@ class Wallet(models.Model):
             # Update self balance to reflect the database change
             self.balance = wallet.balance
 
-    def withdraw(self, amount, description='Mablag\' yechish'):
+    def withdraw(self, amount, description='Mablag\' yechish', force=False):
         from django.db import transaction
         with transaction.atomic():
             wallet = Wallet.objects.select_for_update().get(pk=self.pk)
-            if wallet.balance >= amount:
+            if force or wallet.balance >= amount:
                 wallet.balance -= amount
                 wallet.save()
                 WalletTransaction.objects.create(
@@ -943,8 +963,16 @@ class WalletRequest(models.Model):
                 if self.request_type == 'deposit':
                     wallet.deposit(self.amount, description=f"Hamyon to'ldirildi (So'rov #{self.id})")
                 elif self.request_type == 'withdraw':
-                    if not wallet.withdraw(self.amount, description=f"Mablag' yechildi (So'rov #{self.id})"):
-                        pass
+                    ok = wallet.withdraw(self.amount, description=f"Mablag' yechildi (So'rov #{self.id})")
+                    if not ok:
+                        # Balans yetmasa — so'rovni tasdiqlamaymiz, rad etamiz.
+                        # (Avval 'approved' bo'lib qolardi-yu, pul yechilmasdi.)
+                        self.status = 'rejected'
+                        self.admin_comment = (
+                            (self.admin_comment or '') +
+                            ' [Avtomatik rad: hisobda yetarli mablag\' yo\'q]'
+                        ).strip()
+                        super(WalletRequest, self).save(update_fields=['status', 'admin_comment'])
 
 
 class TelegramOTP(models.Model):
@@ -994,3 +1022,42 @@ class TelegramOTP(models.Model):
             entry.save(update_fields=['is_used'])
             return entry
         return None
+
+
+class ReferralEarning(models.Model):
+    """
+    Har bir referal bonus hodisasini yozib boradi: kimdan, qancha, qaysi
+    to'lov turidan tushdi. "Bonus kimdan qancha tushdi" ko'rinishi shu modeldan.
+    """
+    SOURCE_CHOICES = [
+        ('passenger', 'Yo\'lovchi do\'st safari'),
+        ('driver', 'Haydovchi referal'),
+    ]
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='referral_earnings',
+        verbose_name='Bonus oluvchi (taklif qilgan)'
+    )
+    from_user = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='referral_earnings_generated',
+        verbose_name='Kimdan (taklif qilingan)'
+    )
+    amount = models.DecimalField(max_digits=12, decimal_places=2, verbose_name='Miqdor (UZS)')
+    source = models.CharField(max_length=12, choices=SOURCE_CHOICES, default='passenger')
+    payment_method = models.CharField(max_length=10, blank=True, verbose_name='To\'lov usuli')
+    is_credited = models.BooleanField(default=False, verbose_name='Balansga o\'tkazilgan')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Referal daromad'
+        verbose_name_plural = 'Referal daromadlar'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        src = self.from_user.phone if self.from_user else '—'
+        return f"{self.user.phone} ← {src}: {self.amount} UZS"

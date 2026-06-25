@@ -1,8 +1,9 @@
 import logging
 from django.utils import timezone
 from rest_framework import status, generics, permissions
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from config.throttles import AuthThrottle
 from rest_framework.response import Response
 from decimal import Decimal
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -33,6 +34,7 @@ User = get_user_model()
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@throttle_classes([AuthThrottle])
 def send_otp_view(request):
     """OTP yuborish BEKOR QILINDI — faqat Google bilan kirish ishlatiladi."""
     return Response(
@@ -85,6 +87,7 @@ def is_name_weird(name):
 )
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@throttle_classes([AuthThrottle])
 def verify_otp_view(request):
     """OTP tasdiqlash BEKOR QILINDI — faqat Google bilan kirish ishlatiladi."""
     return Response(
@@ -198,6 +201,7 @@ def verify_otp_view(request):
 )
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@throttle_classes([AuthThrottle])
 def admin_login_view(request):
     """Admin panel uchun phone + parol bilan kirish."""
     phone = request.data.get('phone')
@@ -233,6 +237,7 @@ def admin_login_view(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@throttle_classes([AuthThrottle])
 def login_direct_view(request):
     """
     XAVFSIZLIK: OTPsiz to'g'ridan-to'g'ri kirish O'CHIRILDI.
@@ -325,6 +330,7 @@ def register_driver_view(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@throttle_classes([AuthThrottle])
 def register_driver_public_view(request):
     """Register as a driver publicly from the website (landing page)."""
     serializer = DriverPublicRegistrationSerializer(data=request.data)
@@ -789,6 +795,7 @@ def referral_earnings_view(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@throttle_classes([AuthThrottle])
 def google_auth_view(request):
     """
     Google (Firebase) bilan kirish.
@@ -854,6 +861,15 @@ def google_auth_view(request):
             from accounts.models import Wallet
             wallet, _ = Wallet.objects.get_or_create(user=user)
             wallet.deposit(20000, "Xush kelibsiz (Google orqali)")
+            
+            referral_code = request.data.get('referral_code')
+            if referral_code:
+                from accounts.models import User as UserAccount
+                referrer = UserAccount.objects.filter(referral_code=referral_code).first()
+                if referrer:
+                    user.referred_by = referrer
+                    user.save(update_fields=['referred_by'])
+                    
             logger.info("Yangi foydalanuvchi Google orqali: %s", phone)
 
     refresh = RefreshToken.for_user(user)
@@ -866,6 +882,7 @@ def google_auth_view(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@throttle_classes([AuthThrottle])
 def email_auth_view(request):
     """
     Faqat email orqali to'g'ridan-to'g'ri kirish/ro'yxatdan o'tish (Google'siz).
@@ -908,6 +925,15 @@ def email_auth_view(request):
             from accounts.models import Wallet
             wallet, _ = Wallet.objects.get_or_create(user=user)
             wallet.deposit(20000, "Xush kelibsiz (Email orqali)")
+            
+            referral_code = request.data.get('referral_code')
+            if referral_code:
+                from accounts.models import User as UserAccount
+                referrer = UserAccount.objects.filter(referral_code=referral_code).first()
+                if referrer:
+                    user.referred_by = referrer
+                    user.save(update_fields=['referred_by'])
+                    
             logger.info("Yangi foydalanuvchi Email orqali: %s", phone)
 
     refresh = RefreshToken.for_user(user)

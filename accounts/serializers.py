@@ -1,8 +1,24 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Driver, Vehicle, SavedLocation, Wallet, WalletTransaction, WalletRequest
+from .models import Driver, Vehicle, SavedLocation, Wallet, WalletTransaction, WalletRequest, ReferralEarning
 
 User = get_user_model()
+
+
+class ReferralEarningSerializer(serializers.ModelSerializer):
+    from_name = serializers.SerializerMethodField()
+    from_phone = serializers.CharField(source='from_user.phone', read_only=True, default='')
+    source_display = serializers.CharField(source='get_source_display', read_only=True)
+
+    class Meta:
+        model = ReferralEarning
+        fields = ['id', 'from_name', 'from_phone', 'amount', 'source', 'source_display',
+                  'payment_method', 'is_credited', 'created_at']
+
+    def get_from_name(self, obj):
+        if obj.from_user:
+            return obj.from_user.get_full_name() or obj.from_user.phone
+        return 'Haydovchi referal'
 
 
 class SendOTPSerializer(serializers.Serializer):
@@ -40,9 +56,10 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'has_driver_profile', 'gold_points', 'bank_account_id',
             'id_number', 'referral_code', 'telegram_username', 'telegram_chat_id',
             'passenger_rating', 'total_passenger_rides', 'has_agreed_to_terms',
+            'bonus_balance', 'referral_balance', 'pending_referral_bonus',
             'created_at', 'is_active'
         ]
-        read_only_fields = ['id', 'phone', 'is_verified', 'gold_points', 'id_number', 'referral_code', 'passenger_rating', 'total_passenger_rides', 'has_agreed_to_terms', 'created_at', 'is_active']
+        read_only_fields = ['id', 'phone', 'is_verified', 'gold_points', 'id_number', 'referral_code', 'passenger_rating', 'total_passenger_rides', 'has_agreed_to_terms', 'bonus_balance', 'referral_balance', 'pending_referral_bonus', 'created_at', 'is_active']
 
     def get_has_driver_profile(self, obj):
         return hasattr(obj, 'driver_profile')
@@ -226,6 +243,30 @@ class WalletRequestSerializer(serializers.ModelSerializer):
             'admin_comment', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'user', 'status', 'admin_comment', 'created_at', 'updated_at']
+
+    def validate(self, attrs):
+        user = self.context['request'].user
+        request_type = attrs.get('request_type')
+        amount = attrs.get('amount')
+
+        if request_type == 'withdraw':
+            if not getattr(user, 'bank_account_id', None):
+                raise serializers.ValidationError(
+                    {'bank_account_id': 'Pul yechishdan oldin bank hisob raqamini (karta raqamini) ulashingiz shart.'}
+                )
+            
+            try:
+                from accounts.models import Wallet
+                wallet = Wallet.objects.get(user=user)
+                balance = wallet.balance
+            except Wallet.DoesNotExist:
+                balance = 0
+                
+            if balance < amount:
+                raise serializers.ValidationError(
+                    {'amount': f'Hamyoningizda yetarli mablag\' yo\'q. Joriy balans: {int(balance):,} UZS.'}
+                )
+        return attrs
 
 
 class DriverPublicRegistrationSerializer(serializers.Serializer):

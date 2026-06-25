@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     # Third party
     'rest_framework',
     'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
     'django_filters',
     'channels',
@@ -64,7 +65,9 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    'realtime.middleware.DebugMiddleware',
+    # DebugMiddleware OLIB TASHLANDI: u har bir javobga 'Access-Control-Allow-Origin: *'
+    # qo'yib, production'da CORS cheklovlarini bekor qilardi. CORS'ni faqat
+    # corsheaders boshqaradi (quyidagi CORS_ALLOWED_ORIGINS bo'yicha).
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
@@ -208,18 +211,44 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
+    'DEFAULT_THROTTLE_CLASSES': (
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+    ),
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '100/day',
+        'user': '1000/day',
+        'estimate_price': '20/min',
+        'auth_limit': '5/min',
+    }
 }
+
 
 # JWT Settings
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(days=7),
+    # Access token qisqa muddatli — o'g'irlansa zarar kam (avval 12 soat edi)
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=1),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
     'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
 # Railway HTTPS fix
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+# Production xavfsizlik flaglari (faqat DEBUG=False bo'lganda)
+if not DEBUG:
+    SECURE_SSL_REDIRECT = config('SECURE_SSL_REDIRECT', default=True, cast=bool)
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = 31536000  # 1 yil
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+
+# Firebase (Google bilan kirish) — service account JSON fayl yo'li
+FIREBASE_CREDENTIALS_FILE = config('FIREBASE_CREDENTIALS_FILE', default='')
 
 # CORS — production'da faqat ruxsat berilgan domenlar
 if DEBUG:
@@ -229,23 +258,23 @@ else:
     CORS_ALLOWED_ORIGINS = [
         'https://goldride-admin.vercel.app',
         'https://goldride-reklama.vercel.app',
+        'https://goldride-taxipark.vercel.app',
         'http://localhost:8081',
         'http://localhost:3000',
+        'http://localhost:5173',
     ]
+    # Qo'shimcha domenlarni .env orqali kiritish mumkin (vergul bilan)
+    _extra_cors = config('CORS_EXTRA_ORIGINS', default='')
+    if _extra_cors:
+        CORS_ALLOWED_ORIGINS += [o.strip() for o in _extra_cors.split(',') if o.strip()]
 CORS_ALLOW_CREDENTIALS = False
 
 # OTP Settings
 OTP_EXPIRY_SECONDS = config('OTP_EXPIRY_SECONDS', default=300, cast=int)
 OTP_LENGTH = config('OTP_LENGTH', default=4, cast=int)
 
-# SMS/OTP Settings
-OTP_PROVIDER = config('OTP_PROVIDER', default='simulation') # 'simulation', 'eskiz', 'telegram', 'email'
-SMS_PROVIDER = OTP_PROVIDER # Backward compatibility
-
-# Eskiz
-ESKIZ_EMAIL = config('ESKIZ_EMAIL', default='')
-ESKIZ_PASSWORD = config('ESKIZ_PASSWORD', default='')
-ESKIZ_TOKEN_CACHE_KEY = 'eskiz_token'
+# OTP — Google (Firebase) asosiy, SMS o'chirildi
+# OTP_PROVIDER = config('OTP_PROVIDER', default='simulation')
 
 # Telegram OTP
 TELEGRAM_BOT_TOKEN = config('TELEGRAM_BOT_TOKEN', default='')

@@ -224,13 +224,20 @@ class RideConsumer(AsyncJsonWebsocketConsumer):
     @database_sync_to_async
     def accept_ride_db(self, ride_id):
         from rides.models import Ride
+        from django.db import transaction
         try:
-            ride = Ride.objects.get(id=ride_id)
             driver = self.user.driver_profile
-            ride.driver = driver
-            ride.status = 'driver_found'
-            ride.save()
-            ride.requests.filter(status='matched').update(status='accepted')
+            with transaction.atomic():
+                ride = Ride.objects.select_for_update().get(id=ride_id)
+                # Allaqachon boshqa haydovchi qabul qilgan bo'lsa — rad etamiz
+                if ride.driver_id and ride.driver_id != driver.id:
+                    return None
+                ride.driver = driver
+                ride.status = 'driver_found'
+                ride.save(update_fields=['driver', 'status'])
+                driver.is_being_requested = False
+                driver.save(update_fields=['is_being_requested'])
+                ride.requests.filter(status='matched').update(status='accepted')
             return ride
         except Exception:
             return None

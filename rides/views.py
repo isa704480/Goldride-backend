@@ -2,7 +2,7 @@ import logging
 from rest_framework import status, generics, permissions
 from rest_framework.views import APIView
 from django.contrib.auth import get_user_model
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
 from rest_framework.response import Response
 from django.utils import timezone
@@ -27,12 +27,13 @@ from .serializers import (
 )
 from pricing.engine import calculate_price, calculate_distance, get_active_pricing
 from matching.engine import find_match
-from accounts.gamification import update_driver_goals
 from .utils import is_in_tashkent, notify_ride_status_update
+from config.throttles import EstimatePriceThrottle
 
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@throttle_classes([EstimatePriceThrottle])
 def estimate_price(request):
     """Get price estimate for a ride."""
     serializer = PriceEstimateSerializer(data=request.data)
@@ -99,18 +100,18 @@ def request_ride(request):
 
     # === ANTI-FRAUD: Bloklangan foydalanuvchi tekshiruvi ===
     user = request.user
-    # if user.is_blocked:
-    #     return Response(
-    #         {'detail': 'Sizning akkauntingiz bekor qilishlar limiti oshib ketgani sababli bloklangan. Iltimos, qo\'llab-quvvatlash xizmatiga murojaat qiling.'},
-    #         status=status.HTTP_403_FORBIDDEN
-    #     )
+    if user.is_blocked:
+        return Response(
+            {'detail': 'Sizning akkauntingiz bekor qilishlar limiti oshib ketgani sababli bloklangan. Iltimos, qo\'llab-quvvatlash xizmatiga murojaat qiling.'},
+            status=status.HTTP_403_FORBIDDEN
+        )
 
-    # Penalty balance check disabled as requested
-    # if request.user.penalty_balance > 0:
-    #     return Response(
-    #         {'detail': f'Sizda {int(request.user.penalty_balance)} UZS jarima mavjud. Buyurtma berish uchun avval jarimani to\'lang.'},
-    #         status=status.HTTP_403_FORBIDDEN
-    #     )
+    # Jarima balansi tekshiruvi: jarima bor bo'lsa buyurtma berish taqiqlanadi
+    if user.penalty_balance > 0:
+        return Response(
+            {'detail': f'Sizda {int(user.penalty_balance)} UZS jarima mavjud. Buyurtma berish uchun avval jarimani to\'lang.'},
+            status=status.HTTP_403_FORBIDDEN
+        )
 
     # Check if user already has a pending/active ride
     active = RideRequest.objects.filter(
@@ -187,14 +188,8 @@ def request_ride(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def accept_ride(request, ride_id):
-    """Driver accepts a ride request."""
-    try:
-        ride = Ride.objects.get(id=ride_id)
-    except Ride.DoesNotExist:
-        return Response(
-            {'detail': 'Safar topilmadi.'},
-            status=status.HTTP_404_NOT_FOUND
-        )
+    """Driver accepts a ride request (atomik — ikki haydovchi bir safarni ololmaydi)."""
+    from django.db import transaction
 
     try:
         driver = request.user.driver_profile
@@ -204,23 +199,30 @@ def accept_ride(request, ride_id):
             status=status.HTTP_403_FORBIDDEN
         )
 
-    if ride.driver and ride.driver != driver:
-        return Response(
-            {'detail': 'Bu safar boshqa haydovchiga tayinlangan.'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
+    try:
+        with transaction.atomic():
+            # Safarni qulflaymiz — boshqa tranzaksiya bir vaqtda o'zgartira olmaydi
+            ride = Ride.objects.select_for_update().get(id=ride_id)
 
-    ride.driver = driver
-    ride.status = 'driver_found'
-    ride.save()
+            if ride.driver_id and ride.driver_id != driver.id:
+                return Response(
+                    {'detail': 'Bu safar boshqa haydovchiga tayinlangan.'},
+                    status=status.HTTP_409_CONFLICT
+                )
 
-    # Haydovchi qulfini ochish — endi yangi buyurtma qabul qila oladi
-    driver.is_being_requested = False
-    driver.save(update_fields=['is_being_requested'])
+            ride.driver = driver
+            ride.status = 'driver_found'
+            ride.save(update_fields=['driver', 'status'])
 
-    ride.requests.filter(status='matched').update(status='accepted')
+            # Haydovchi qulfini ochish — endi yangi buyurtma qabul qila oladi
+            driver.is_being_requested = False
+            driver.save(update_fields=['is_being_requested'])
+
+            ride.requests.filter(status='matched').update(status='accepted')
+    except Ride.DoesNotExist:
+        return Response({'detail': 'Safar topilmadi.'}, status=status.HTTP_404_NOT_FOUND)
+
     notify_ride_status_update(ride.id, 'driver_found')
-
     return Response(RideSerializer(ride).data)
 
 
@@ -248,12 +250,16 @@ def cancel_ride(request, ride_id):
     if user.role == 'passenger':
         passenger = ride.passengers.filter(user=user).first()
         if passenger:
-            # Cancellation fee disabled
-            # if ride.status in ['driver_found', 'on_the_way', 'arrived']:
-            #     pricing = get_active_pricing()
-            #     fee = pricing.get('cancellation_fee', 2000)
-            #     user.penalty_balance += fee
-            #     user.save(update_fields=['penalty_balance'])
+            # Haydovchi topilgandan keyin bekor qilish — jarima yoziladi
+            if ride.status in ['driver_found', 'on_the_way', 'arrived']:
+                pricing = get_active_pricing()
+                fee = Decimal(str(pricing.get('cancellation_fee', 2000)))
+                user.penalty_balance = (user.penalty_balance or Decimal('0')) + fee
+                user.save(update_fields=['penalty_balance'])
+                logger.info(
+                    "Bekor qilish jarimasi: %s → %d UZS (safar #%d, holat: %s)",
+                    user.phone, fee, ride.id, ride.status
+                )
 
             passenger.delete()
             RideRequest.objects.filter(
@@ -291,11 +297,20 @@ def cancel_ride(request, ride_id):
             try:
                 from accounts.models import Wallet
                 wallet, _ = Wallet.objects.get_or_create(user=user)
-                wallet.withdraw(penalty, description="Ketma-ket 3 marta bekor qilish jarimasi")
-                logger.warning(
-                    "Jarima: %s dan %d UZS yechildi (3x bekor qilish)",
-                    user.phone, penalty
-                )
+                withdrawn = wallet.withdraw(penalty, description="Ketma-ket 3 marta bekor qilish jarimasi")
+                if withdrawn:
+                    logger.warning(
+                        "Jarima: %s dan %d UZS yechildi (3x bekor qilish)",
+                        user.phone, penalty
+                    )
+                else:
+                    # Hamyonda pul yetmasa — qarz sifatida yozamiz
+                    user.penalty_balance = (user.penalty_balance or Decimal('0')) + penalty
+                    user.save(update_fields=['penalty_balance'])
+                    logger.warning(
+                        "Jarima: %s hamyonida pul yetmadi, qarz yozildi: %d UZS",
+                        user.phone, penalty
+                    )
             except Exception as e:
                 logger.error("Jarima yechishda xatolik %s: %s", user.phone, e)
 
@@ -407,7 +422,17 @@ def mark_arrived(request, ride_id):
 
 
 def _finalize_ride(ride, driver):
-    """Safar yakunlash: komissiya, keshbek, referral bonus, maqsad."""
+    """Safar yakunlash: komissiya, keshbek, referral bonus, maqsad.
+
+    Butun jarayon bitta atomik tranzaksiyada — o'rtada xato bo'lsa,
+    hamma o'zgarish bekor qilinadi (yarim holat, pul yo'qotish bo'lmaydi).
+    """
+    from django.db import transaction
+    with transaction.atomic():
+        _finalize_ride_atomic(ride, driver)
+
+
+def _finalize_ride_atomic(ride, driver):
     from pricing.engine import recalculate_ride_fares
     from accounts.models import Wallet
     from accounts.cashback import (
@@ -419,6 +444,10 @@ def _finalize_ride(ride, driver):
         check_and_complete_driver_goal,
         MAX_BONUS_USAGE,
     )
+
+    # Ikki marta yakunlanishdan himoya (idempotentlik)
+    if ride.status == 'completed':
+        return
 
     ride.status = 'completed'
     ride.completed_at = timezone.now()
@@ -436,7 +465,6 @@ def _finalize_ride(ride, driver):
     ride.save()
 
     driver_wallet, _ = Wallet.objects.get_or_create(user=driver.user)
-    driver_wallet.deposit(ride.driver_earnings, f"Safar #{ride.id} daromadi")
 
     for passenger in ride.passengers.all():
         pass_wallet, _ = Wallet.objects.get_or_create(user=passenger.user)
@@ -462,11 +490,36 @@ def _finalize_ride(ride, driver):
             pass  # Frontend xabar beradi
 
         remaining_fare = fare - bonus_usage
+        
+        # Haydovchiga bonus qismini doimo tushiramiz (chunki u kompaniya tomonidan to'lanadi)
+        if bonus_usage > 0:
+            driver_wallet.deposit(bonus_usage, f"Safar #{ride.id} yo'lovchi {user.phone} bonus to'lovi")
+
         if remaining_fare > 0:
-            pass_wallet.withdraw(
-                remaining_fare,
-                description=f"Safar #{ride.id} to'lovi (bonus: {int(bonus_usage)} UZS)"
-            )
+            if payment_method in ['card', 'bonus']:
+                paid = pass_wallet.withdraw(
+                    remaining_fare,
+                    description=f"Safar #{ride.id} to'lovi (bonus: {int(bonus_usage)} UZS)"
+                )
+                if not paid:
+                    # Balans yetmadi — pulni "yo'qdan" yaratmaymiz.
+                    # Ishlatilgan bonusni qaytaramiz va qoldiqni qarz (penalty) sifatida yozamiz.
+                    if bonus_usage > 0:
+                        user.bonus_balance = (user.bonus_balance or Decimal('0')) + bonus_usage
+                        user.save(update_fields=['bonus_balance'])
+                    user.penalty_balance = (user.penalty_balance or Decimal('0')) + remaining_fare
+                    user.save(update_fields=['penalty_balance'])
+                    logger.warning(
+                        "To'lov amalga oshmadi: %s balansi yetmadi (kerak: %s). Qarz sifatida yozildi.",
+                        user.phone, remaining_fare
+                    )
+                else:
+                    # Karta orqali muvaffaqiyatli to'landi, haydovchiga tushiramiz
+                    driver_wallet.deposit(remaining_fare, f"Safar #{ride.id} yo'lovchi {user.phone} karta to'lovi")
+            else:
+                # Cash payment: No withdrawal from passenger wallet.
+                # Driver collected remaining_fare directly in cash, so we don't deposit to driver_wallet.
+                pass
 
         # GoldPoints: har 1000 UZS uchun 1 ball
         points = int(fare / 1000)
@@ -490,6 +543,43 @@ def _finalize_ride(ride, driver):
             )
             user.referral_rides_count = (user.referral_rides_count or 0) + 1
             user.save(update_fields=['referral_rides_count'])
+
+            # 3-safardan keyin 20,000 UZS ikkala foydalanuvchiga ham bonus berish
+            try:
+                from rides.models import ReferralBonus
+                ref_bonus, created = ReferralBonus.objects.get_or_create(
+                    user=user.referred_by,
+                    referred_user=user,
+                    defaults={
+                        'amount': Decimal('20000'),
+                        'rides_required': 3,
+                        'rides_completed': 0,
+                        'is_paid': False
+                    }
+                )
+                if not ref_bonus.is_paid:
+                    ref_bonus.rides_completed += 1
+                    if ref_bonus.rides_completed >= ref_bonus.rides_required:
+                        ref_bonus.is_paid = True
+                        
+                        # Taklif qilganga 20,000 UZS
+                        ref_wallet, _ = Wallet.objects.get_or_create(user=ref_bonus.user)
+                        ref_wallet.deposit(Decimal('20000'), f"Taklif qilingan do'st {user.phone} 3 ta safar bajardi")
+                        
+                        # Do'stga ham 20,000 UZS
+                        user_wallet, _ = Wallet.objects.get_or_create(user=user)
+                        user_wallet.deposit(Decimal('20000'), "Taklif kodidan foydalanib 3 ta safar bajarganlik bonusi")
+                        
+                        logger.info(
+                            "Referral bonus to'landi: taklif qiluvchi %s, do'st %s (20,000 UZS dan)",
+                            ref_bonus.user.phone, user.phone
+                        )
+                    ref_bonus.save()
+            except Exception as e:
+                logger.error("Referral bonus hisoblashda xatolik: %s", e)
+
+    # Haydovchidan komissiyani yechib olish
+    driver_wallet.withdraw(ride.commission_amount, f"Safar #{ride.id} uchun komissiya yechildi", force=True)
 
     # Haydovchi statistikasi yangilash
     driver.commission_paid = (driver.commission_paid or Decimal('0')) + ride.commission_amount
@@ -537,27 +627,41 @@ def complete_ride(request, ride_id):
 def pickup_passenger(request, ride_id, passenger_id):
     """Mark a passenger as picked up."""
     try:
-        passenger = RidePassenger.objects.get(ride_id=ride_id, id=passenger_id)
+        passenger = RidePassenger.objects.select_related('ride', 'ride__driver').get(ride_id=ride_id, id=passenger_id)
     except RidePassenger.DoesNotExist:
         return Response(
             {'detail': 'Yo\'lovchi topilmadi.'},
             status=status.HTTP_404_NOT_FOUND
         )
 
+    # AVTORIZATSIYA: faqat shu safarga tayinlangan haydovchi amalga oshira oladi
+    try:
+        driver = request.user.driver_profile
+    except Driver.DoesNotExist:
+        driver = None
+    if not driver or passenger.ride.driver_id != driver.id:
+        return Response(
+            {'detail': 'Bu safar sizga tayinlanmagan.'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
     passenger.picked_up = True
     passenger.picked_up_at = timezone.now()
     
-    # Calculate waiting penalty
+    # Kutish jarimasi: 2 daqiqadan ortiq kutish — har daqiqaga 500 UZS
     if passenger.arrived_at:
         wait_time = passenger.picked_up_at - passenger.arrived_at
         wait_minutes = wait_time.total_seconds() / 60
-        # Waiting penalty disabled
-        # if wait_minutes > 2:
-        #     pricing = get_active_pricing()
-        #     penalty = int(wait_minutes - 2) * pricing.get('waiting_rate_per_min', 500)
-        #     passenger.waiting_penalty = penalty
-        #     passenger.fare += penalty
-            
+        if wait_minutes > 2:
+            pricing = get_active_pricing()
+            penalty = int(wait_minutes - 2) * pricing.get('waiting_rate_per_min', 500)
+            passenger.waiting_penalty = penalty
+            passenger.fare += penalty
+            logger.info(
+                "Kutish jarimasi: safar #%d, %d daqiqa kutdi → %d UZS",
+                passenger.ride_id, int(wait_minutes), penalty
+            )
+
     passenger.save()
 
     # If all passengers picked up, update ride status
@@ -579,11 +683,22 @@ def pickup_passenger(request, ride_id, passenger_id):
 def dropoff_passenger(request, ride_id, passenger_id):
     """Mark a passenger as dropped off."""
     try:
-        passenger = RidePassenger.objects.get(ride_id=ride_id, id=passenger_id)
+        passenger = RidePassenger.objects.select_related('ride').get(ride_id=ride_id, id=passenger_id)
     except RidePassenger.DoesNotExist:
         return Response(
             {'detail': 'Yo\'lovchi topilmadi.'},
             status=status.HTTP_404_NOT_FOUND
+        )
+
+    # AVTORIZATSIYA: faqat shu safarga tayinlangan haydovchi amalga oshira oladi
+    try:
+        driver = request.user.driver_profile
+    except Driver.DoesNotExist:
+        driver = None
+    if not driver or passenger.ride.driver_id != driver.id:
+        return Response(
+            {'detail': 'Bu safar sizga tayinlanmagan.'},
+            status=status.HTTP_403_FORBIDDEN
         )
 
     passenger.dropped_off = True
@@ -594,10 +709,6 @@ def dropoff_passenger(request, ride_id, passenger_id):
 
     # If all passengers dropped off, complete the ride
     if not ride.passengers.filter(dropped_off=False).exists():
-        try:
-            driver = request.user.driver_profile
-        except Exception:
-            return Response({'detail': 'Haydovchi profili topilmadi.'}, status=status.HTTP_403_FORBIDDEN)
         _finalize_ride(ride, driver)
         return Response(RideSerializer(ride).data)
 
@@ -661,10 +772,26 @@ def rate_ride(request, ride_id):
             status=status.HTTP_404_NOT_FOUND
         )
 
+    # AVTORIZATSIYA: faqat shu safar ishtirokchisi baho bera oladi
+    is_passenger = ride.passengers.filter(user=request.user).exists()
+    is_ride_driver = bool(ride.driver and ride.driver.user_id == request.user.id)
+    if not is_passenger and not is_ride_driver:
+        return Response(
+            {'detail': 'Siz ushbu safarda qatnashmagansiz.'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    # Takroriy baho berishdan himoya
+    if RideRating.objects.filter(ride=ride, user=request.user).exists():
+        return Response(
+            {'detail': 'Siz bu safarni allaqachon baholagansiz.'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
     # Determine target user
     target_user_id = request.data.get('target_user_id')
     target_user = None
-    
+
     if request.user.role == 'driver':
         if not target_user_id:
             return Response({'detail': 'Yo\'lovchi ID si ko\'rsatilmadi.'}, status=400)
@@ -1052,8 +1179,13 @@ def admin_update_external_eta(request, request_id):
     return Response(RideRequestSerializer(ride_req).data)
 
 
-class AdminAnalyticsView(generics.GenericAPIView):
-    """Analytics and Heatmap data for Admin."""
+class AdminHeatmapView(generics.GenericAPIView):
+    """Talab issiqlik xaritasi (heatmap) va ta'minot statistikasi — Admin uchun.
+
+    Eslatma: avval bu klass ham `AdminAnalyticsView` deb nomlangan edi va
+    daromad/growth analitikasini beradigan birinchi `AdminAnalyticsView` ni
+    "soya"lab, admin panelga noto'g'ri ma'lumot qaytarardi. Endi alohida nom.
+    """
     permission_classes = [permissions.IsAdminUser]
 
     def get(self, request):
@@ -1063,7 +1195,7 @@ class AdminAnalyticsView(generics.GenericAPIView):
             created_at__gte=recent_cutoff,
             status__in=['pending', 'matched']
         ).values('pickup_lat', 'pickup_lng')
-        
+
         heatmap_data = []
         for r in requests:
             heatmap_data.append({
