@@ -10,6 +10,8 @@ urlpatterns = [
     path('admin/login/', views.admin_login_view, name='admin-login'),
     path('token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),
     path('auth/google/', views.google_auth_view, name='google-auth'),
+    path('auth/email/', views.email_auth_view, name='email-auth'),
+
 
     # Registration
     path('register/', views.register_user_view, name='register-user'),

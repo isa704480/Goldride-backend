@@ -865,6 +865,60 @@ def google_auth_view(request):
 
 
 @api_view(['POST'])
+@permission_classes([AllowAny])
+def email_auth_view(request):
+    """
+    Faqat email orqali to'g'ridan-to'g'ri kirish/ro'yxatdan o'tish (Google'siz).
+    """
+    email = request.data.get('email')
+    if not email:
+        return Response({'detail': 'Email kiritish shart.'}, status=400)
+
+    email = email.strip().lower()
+    phone = request.data.get('phone')
+    first_name = request.data.get('first_name', '')
+    last_name = request.data.get('last_name', '')
+
+    user = User.objects.filter(email=email).first()
+
+    if not user:
+        if not phone:
+            return Response({
+                'detail': 'Telefon raqami shart — ro\'yxatdan o\'tish uchun kiritish kerak.',
+                'email': email,
+                'first_name': first_name,
+                'last_name': last_name
+            }, status=400)
+
+        if not phone.startswith('+'):
+            phone = '+' + phone
+
+        # Yangi foydalanuvchi yaratish
+        user, created = User.objects.get_or_create(
+            phone=phone,
+            defaults={
+                'email': email,
+                'first_name': first_name,
+                'last_name': last_name,
+                'username': phone,
+                'is_verified': True
+            }
+        )
+        if created:
+            from accounts.models import Wallet
+            wallet, _ = Wallet.objects.get_or_create(user=user)
+            wallet.deposit(20000, "Xush kelibsiz (Email orqali)")
+            logger.info("Yangi foydalanuvchi Email orqali: %s", phone)
+
+    refresh = RefreshToken.for_user(user)
+    return Response({
+        'access': str(refresh.access_token),
+        'refresh': str(refresh),
+        'user': UserProfileSerializer(user).data
+    })
+
+
+@api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def deposit_wallet_view(request):
     """Deposit money to wallet."""
