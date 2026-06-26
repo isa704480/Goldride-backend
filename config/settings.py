@@ -256,6 +256,10 @@ if DEBUG:
 else:
     CORS_ALLOW_ALL_ORIGINS = False
     CORS_ALLOWED_ORIGINS = [
+        'https://goldride.uz',
+        'https://www.goldride.uz',
+        'https://park.goldride.uz',
+        'https://admin.goldride.uz',
         'https://goldride-admin.vercel.app',
         'https://goldride-reklama.vercel.app',
         'https://goldride-taxipark.vercel.app',
