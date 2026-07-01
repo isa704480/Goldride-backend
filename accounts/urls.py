@@ -65,9 +65,12 @@ urlpatterns = [
     path('taxi-park/drivers/<int:driver_id>/', views.taxi_park_driver_detail_view, name='taxi-park-driver-detail'),
     path('taxi-park/drivers/<int:driver_id>/approve/', views.taxi_park_approve_driver_view, name='taxi-park-approve-driver'),
     path('taxi-park/stats/', views.taxi_park_stats_view, name='taxi-park-stats'),
+    path('taxi-park/me/update/', views.taxi_park_update_profile_view, name='taxi-park-update-profile'),
+    path('taxi-park/change-password/', views.taxi_park_change_password_view, name='taxi-park-change-password'),
 
     # Admin — Taksi parklar
     path('admin/taxi-parks/', views.AdminTaxiParkListView.as_view(), name='admin-taxi-parks'),
+    path('admin/taxi-parks/create/', views.admin_taxi_park_create_view, name='admin-taxi-park-create'),
     path('admin/taxi-parks/<int:pk>/', views.AdminTaxiParkDetailView.as_view(), name='admin-taxi-park-detail'),
     path('admin/taxi-parks/<int:park_id>/action/', views.admin_taxi_park_action, name='admin-taxi-park-action'),
     path('admin/taxi-parks/<int:park_id>/drivers/', views.AdminTaxiParkDriversView.as_view(), name='admin-taxi-park-drivers'),

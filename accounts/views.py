@@ -1215,6 +1215,53 @@ class AdminTaxiParkDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 @api_view(['POST'])
 @permission_classes([permissions.IsAdminUser])
+def admin_taxi_park_create_view(request):
+    """Admin: yangi taksi park yaratish (admin o'zi ma'lumotlarini kiritib, darhol tasdiqlaydi)."""
+    import secrets
+    from .models import TaxiPark
+    data = request.data
+    required = ['name', 'phone', 'contact_person']
+    for field in required:
+        if not data.get(field):
+            return Response({'detail': f'{field} majburiy.'}, status=400)
+
+    if TaxiPark.objects.filter(phone=data['phone']).exists():
+        return Response({'detail': 'Bu telefon raqam allaqachon ro\'yxatda.'}, status=400)
+
+    status_value = data.get('status', 'approved')
+    if status_value not in dict(TaxiPark.STATUS_CHOICES):
+        status_value = 'approved'
+
+    park = TaxiPark(
+        name=data['name'],
+        phone=data['phone'],
+        contact_person=data['contact_person'],
+        address=data.get('address', ''),
+        inn=data.get('inn', ''),
+        description=data.get('description', ''),
+        status=status_value,
+    )
+    password = (data.get('password') or '').strip() or secrets.token_urlsafe(6)
+    park.set_password(password)
+    park.save()
+    logger.info("Admin yangi taksi park yaratdi: %s (%s)", park.name, park.phone)
+    return Response({
+        'id': park.id,
+        'name': park.name,
+        'phone': park.phone,
+        'contact_person': park.contact_person,
+        'address': park.address,
+        'inn': park.inn,
+        'description': park.description,
+        'status': park.status,
+        'driver_count': park.driver_count,
+        'api_token': park.api_token,
+        'password': password,  # faqat yaratilganda ko'rsatish uchun qaytariladi
+    }, status=201)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAdminUser])
 def admin_taxi_park_action(request, park_id):
     """Admin: taksi parkni tasdiqlash/bloklash."""
     from .models import TaxiPark
@@ -1527,6 +1574,58 @@ def taxi_park_driver_detail_view(request, driver_id):
         driver.delete()
         user.delete()
         return Response({'detail': 'Haydovchi o\'chirildi.'}, status=204)
+
+
+@api_view(['PUT', 'PATCH'])
+@permission_classes([permissions.AllowAny])
+def taxi_park_update_profile_view(request):
+    """Park o'z profilini yangilash: name, contact_person, address, inn, description."""
+    park = _get_park_from_token(request)
+    if not park:
+        return Response({'detail': 'Token yaroqsiz.'}, status=401)
+
+    data = request.data
+    allowed_fields = ['name', 'contact_person', 'address', 'inn', 'description']
+    changed = []
+    for field in allowed_fields:
+        if field in data and data[field] is not None:
+            setattr(park, field, data[field])
+            changed.append(field)
+
+    if changed:
+        park.save(update_fields=changed + ['updated_at'])
+
+    return Response({
+        'id': park.id, 'name': park.name, 'phone': park.phone,
+        'contact_person': park.contact_person, 'address': park.address,
+        'inn': park.inn, 'description': getattr(park, 'description', ''),
+        'driver_count': park.driver_count, 'status': park.status,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def taxi_park_change_password_view(request):
+    """Park paroli o'zgartirish."""
+    park = _get_park_from_token(request)
+    if not park:
+        return Response({'detail': 'Token yaroqsiz.'}, status=401)
+
+    current_password = request.data.get('current_password', '').strip()
+    new_password = request.data.get('new_password', '').strip()
+
+    if not current_password or not new_password:
+        return Response({'detail': 'Joriy va yangi parol kiritilishi shart.'}, status=400)
+
+    if len(new_password) < 6:
+        return Response({'detail': 'Yangi parol kamida 6 ta belgidan iborat bo\'lishi kerak.'}, status=400)
+
+    if not park.check_password(current_password):
+        return Response({'detail': 'Joriy parol noto\'g\'ri.'}, status=400)
+
+    park.set_password(new_password)
+    park.save(update_fields=['password', 'updated_at'])
+    return Response({'detail': 'Parol muvaffaqiyatli o\'zgartirildi.'})
 
 
 @api_view(['GET'])
