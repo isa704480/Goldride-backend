@@ -107,12 +107,20 @@ class DriverRegistrationSerializer(serializers.Serializer):
     tech_passport_photo_back = serializers.ImageField(required=False)
     # Agreement
     has_agreed_to_terms = serializers.BooleanField(default=False)
+    # Ixtiyoriy: haydovchi tanlagan taksi parki (bo'sh bo'lsa — mustaqil haydovchi)
+    taxi_park_id = serializers.IntegerField(required=False, allow_null=True)
 
     def create(self, validated_data):
         user = self.context['request'].user
         user.role = 'driver'
         user.is_verified = True
         user.save()
+
+        selected_park = None
+        taxi_park_id = validated_data.get('taxi_park_id')
+        if taxi_park_id:
+            from .models import TaxiPark
+            selected_park = TaxiPark.objects.filter(id=taxi_park_id, status='approved').first()
 
         driver = Driver.objects.create(
             user=user,
@@ -123,6 +131,7 @@ class DriverRegistrationSerializer(serializers.Serializer):
             passport_photo_back=validated_data.get('passport_photo_back'),
             face_id_photo=validated_data.get('face_id_photo'),
             taxi_license_photo=validated_data.get('taxi_license_photo'),
+            taxi_park=selected_park,
             status='approved'
         )
 

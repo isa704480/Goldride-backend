@@ -1161,8 +1161,11 @@ def taxi_park_register_view(request):
 def taxi_park_list_public_view(request):
     """Tasdiqlangan taksi parklarini ko'rsatish (haydovchi ro'yxatdan o'tishda tanlash uchun)."""
     from .models import TaxiPark
-    parks = TaxiPark.objects.filter(status='approved').values('id', 'name', 'address', 'driver_count')
-    return Response(list(parks))
+    parks = TaxiPark.objects.filter(status='approved').order_by('name')
+    return Response([
+        {'id': p.id, 'name': p.name, 'address': p.address, 'driver_count': p.driver_count}
+        for p in parks
+    ])
 
 
 class AdminTaxiParkListView(generics.ListAPIView):
