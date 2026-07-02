@@ -287,6 +287,10 @@ TELEGRAM_ADMIN_CHAT_ID = config('TELEGRAM_ADMIN_CHAT_ID', default='')
 # Bot polling EMAS, webhook ishlatiladi — bir nechta instance muammosi yo'q
 TELEGRAM_WEBHOOK_BASE_URL = config('TELEGRAM_WEBHOOK_BASE_URL', default='')
 
+# Reklama saytidagi "Fikringiz" formasi uchun alohida bot (vergul bilan ajratilgan chat_id'lar)
+FEEDBACK_BOT_TOKEN = config('FEEDBACK_BOT_TOKEN', default='')
+FEEDBACK_CHAT_IDS = config('FEEDBACK_CHAT_IDS', default='')
+
 # Email OTP (Gmail/SMTP)
 OTP_EMAIL_RECIPIENT = config('OTP_EMAIL_RECIPIENT', default='admin@goldride.uz')
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'

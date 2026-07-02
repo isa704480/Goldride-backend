@@ -106,3 +106,36 @@ def send_telegram_notification(message, chat_id=None):
     except Exception as e:
         print(f"[Telegram] Error sending message: {e}")
         return False
+
+
+def send_feedback_to_telegram(phone, message):
+    """Reklama saytidagi fikr-mulohaza formasidan kelgan xabarni
+    alohida sozlangan Telegram bot orqali bir nechta chat'ga yuboradi."""
+    token = getattr(settings, 'FEEDBACK_BOT_TOKEN', None)
+    chat_ids_raw = getattr(settings, 'FEEDBACK_CHAT_IDS', '')
+    chat_ids = [c.strip() for c in chat_ids_raw.split(',') if c.strip()]
+
+    if not token or not chat_ids:
+        print("[Telegram Feedback] Missing FEEDBACK_BOT_TOKEN or FEEDBACK_CHAT_IDS")
+        return False
+
+    text = (
+        "\U0001F4AC <b>Yangi fikr — Goldride sayti</b>\n\n"
+        f"\U0001F4DE Telefon: {phone}\n"
+        f"\U0001F4DD Fikr: {message}"
+    )
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+
+    all_ok = True
+    for chat_id in chat_ids:
+        try:
+            response = requests.post(
+                url, json={'chat_id': chat_id, 'text': text, 'parse_mode': 'HTML'}, timeout=5
+            )
+            if response.status_code != 200:
+                print(f"[Telegram Feedback] Error for chat {chat_id}: {response.text}")
+                all_ok = False
+        except Exception as e:
+            print(f"[Telegram Feedback] Error sending to {chat_id}: {e}")
+            all_ok = False
+    return all_ok

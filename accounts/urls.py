@@ -18,6 +18,9 @@ urlpatterns = [
     path('register/driver/', views.register_driver_view, name='register-driver'),
     path('register/driver/public/', views.register_driver_public_view, name='register-driver-public'),
 
+    # Sayt fikr-mulohaza (reklama sayti)
+    path('feedback/', views.site_feedback_view, name='site-feedback'),
+
     # Profile
     path('profile/', views.UserProfileView.as_view(), name='user-profile'),
     path('driver/profile/', views.DriverProfileView.as_view(), name='driver-profile'),

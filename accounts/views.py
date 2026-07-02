@@ -1113,6 +1113,31 @@ def withdraw_referral_view(request):
     return Response({'detail': message})
 
 
+# ============ SAYT FIKR-MULOHAZA ============
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+@throttle_classes([AuthThrottle])
+def site_feedback_view(request):
+    """Reklama saytidagi 'Fikringiz' formasi — Telegram botga yuboriladi."""
+    phone = (request.data.get('phone') or '').strip()
+    message = (request.data.get('message') or '').strip()
+
+    if not phone:
+        return Response({'detail': 'Telefon raqamingizni kiriting.'}, status=400)
+    if not message:
+        return Response({'detail': 'Fikringizni yozing.'}, status=400)
+    if len(message) > 2000:
+        return Response({'detail': "Fikr juda uzun (2000 belgigacha)."}, status=400)
+
+    from .utils import send_feedback_to_telegram
+    sent = send_feedback_to_telegram(phone, message)
+    if not sent:
+        logger.warning("Sayt fikri Telegramga yuborilmadi: %s", phone)
+
+    return Response({'detail': "Fikringiz uchun rahmat! Tez orada bog'lanamiz."}, status=201)
+
+
 # ============ TAKSI PARK ============
 
 @api_view(['POST'])
