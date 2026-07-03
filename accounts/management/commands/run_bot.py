@@ -108,6 +108,9 @@ class Command(BaseCommand):
         otp = otp_entry.otp
 
         user = User.objects.filter(phone=phone).first()
+        if user:
+            user.telegram_chat_id = str(chat_id)
+            user.save(update_fields=['telegram_chat_id'])
 
         if user:
             msg = (

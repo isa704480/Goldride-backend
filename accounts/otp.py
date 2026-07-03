@@ -95,7 +95,7 @@ def verify_otp(phone: str, otp: str) -> bool:
     """
     OTP ni tekshirish.
     - 5 marta noto'g'ri kiritilsa: 15 daqiqa bloklash
-    - To'g'ri bo'lsa: keshdan o'chirish
+    - To'g'ri bo'lsa: keshdan/DBdan o'chirish
     """
     cfg = _security_cfg()
 
@@ -120,9 +120,23 @@ def verify_otp(phone: str, otp: str) -> bool:
         )
         return False
 
+    # Check cache first
     stored_otp = cache.get(key)
+    is_valid = False
+
     if stored_otp and stored_otp == otp:
         cache.delete(key)
+        is_valid = True
+    else:
+        # Check TelegramOTP model in DB
+        from accounts.models import TelegramOTP
+        otp_record = TelegramOTP.objects.filter(phone=phone, is_used=False).first()
+        if otp_record and otp_record.is_valid() and otp_record.otp == otp:
+            otp_record.is_used = True
+            otp_record.save(update_fields=['is_used'])
+            is_valid = True
+
+    if is_valid:
         cache.delete(attempts_key)
         logger.info("OTP muvaffaqiyatli tasdiqlandi: %s", phone)
         return True
@@ -148,6 +162,32 @@ def send_otp(phone: str) -> str:
     provider = get_otp_provider()
     message = f"Goldride: Tasdiqlash kodingiz: {otp}"
     provider.send_sms(phone, message)
+
+    # Shuningdek, Telegram bot orqali ham xabar yuborish (agar telegram_chat_id bo'lsa)
+    try:
+        from accounts.models import User, TelegramOTP
+        from .utils import send_telegram_notification
+        
+        user = User.objects.filter(phone=phone).first()
+        chat_id = None
+        if user and user.telegram_chat_id:
+            chat_id = user.telegram_chat_id
+        else:
+            # Oxirgi TelegramOTP recordidan chat_id ni olishga harakat qilamiz
+            last_record = TelegramOTP.objects.filter(phone=phone).first()
+            if last_record:
+                chat_id = last_record.chat_id
+
+        if chat_id:
+            tg_message = (
+                f"🔑 <b>Goldride tasdiqlash kodi</b>\n\n"
+                f"Sizning kirish kodingiz: <b>{otp}</b>\n\n"
+                f"⏱ Kod 5 daqiqa davomida amal qiladi."
+            )
+            send_telegram_notification(tg_message, chat_id=chat_id)
+            logger.info("OTP Telegram orqali ham yuborildi: %s to %s", phone, chat_id)
+    except Exception as e:
+        logger.error("OTPni Telegramga yuborishda xatolik: %s", e)
 
     return otp
 

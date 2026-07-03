@@ -821,6 +821,97 @@ def referral_earnings_view(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+def telegram_webhook(request):
+    """
+    Telegram Bot Webhook — polling emas, Telegram o'zi POST yuboradi.
+    """
+    token = settings.TELEGRAM_BOT_TOKEN
+    if not token:
+        return Response({'status': 'no_token'}, status=200)
+
+    data = request.data
+    message = data.get('message', {})
+    if not message:
+        return Response({'status': 'ok'}, status=200)
+
+    chat_id = message.get('chat', {}).get('id')
+    text = message.get('text', '')
+    contact = message.get('contact')
+
+    if not chat_id:
+        return Response({'status': 'ok'}, status=200)
+
+    if text == '/start':
+        welcome = (
+            "🚕 <b>Goldride</b> botiga xush kelibsiz!\n\n"
+            "📱 Tizimga kirish uchun telefon raqamingizni yuboring.\n"
+            "Sizga 6 xonali tasdiqlash kodi yuboriladi."
+        )
+        reply_markup = {
+            'keyboard': [[{'text': '📱 Telefon raqamni yuborish', 'request_contact': True}]],
+            'resize_keyboard': True,
+            'one_time_keyboard': True,
+        }
+        _tg_send(token, chat_id, welcome, reply_markup=reply_markup)
+
+    elif contact:
+        from .models import TelegramOTP
+        phone = contact.get('phone_number', '')
+        if not phone.startswith('+'):
+            phone = '+' + phone
+
+        # Save telegram_chat_id to user profile if it exists
+        user = User.objects.filter(phone=phone).first()
+        if user:
+            user.telegram_chat_id = str(chat_id)
+            user.save(update_fields=['telegram_chat_id'])
+
+        otp_entry = TelegramOTP.create_otp(phone, chat_id=chat_id)
+        otp = otp_entry.otp
+
+        if user:
+            msg = (
+                f"✅ <b>Akkauntingiz topildi!</b>\n\n"
+                f"Ilovaga kirish uchun kodni kiriting:\n\n"
+                f"🔑 <b>{otp}</b>\n\n"
+                f"⏱ Kod 5 daqiqa amal qiladi."
+            )
+        else:
+            msg = (
+                f"📱 Telefon: <code>{phone}</code>\n\n"
+                f"Ilovaga kirish kodi:\n\n"
+                f"🔑 <b>{otp}</b>\n\n"
+                f"⏱ Kod 5 daqiqa amal qiladi.\n\n"
+                f"❗ Yangi foydalanuvchi — ilovada ro'yxatdan o'ting."
+            )
+
+        _tg_send(token, chat_id, msg)
+        logger.info("Telegram OTP yuborildi: %s (webhook)", phone)
+
+    else:
+        _tg_send(token, chat_id, "Iltimos, pastdagi tugmani bosib telefon raqamingizni yuboring.")
+
+    return Response({'status': 'ok'}, status=200)
+
+
+def _tg_send(token, chat_id, text, reply_markup=None):
+    import json, requests
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    data = {
+        'chat_id': chat_id,
+        'text': text,
+        'parse_mode': 'HTML'
+    }
+    if reply_markup:
+        data['reply_markup'] = json.dumps(reply_markup)
+    try:
+        requests.post(url, data=data, timeout=10)
+    except Exception as e:
+        logger.error("Xabar yuborishda xatolik (webhook): %s", e)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
 @throttle_classes([AuthThrottle])
 def google_auth_view(request):
     """

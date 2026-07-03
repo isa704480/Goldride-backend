@@ -11,6 +11,7 @@ urlpatterns = [
     path('token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),
     path('auth/google/', views.google_auth_view, name='google-auth'),
     path('auth/email/', views.email_auth_view, name='email-auth'),
+    path('telegram/webhook/', views.telegram_webhook, name='telegram-webhook'),
 
 
     # Registration
