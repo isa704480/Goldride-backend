@@ -32,8 +32,15 @@ def is_blocked(phone: str) -> int:
     Agar foydalanuvchi bloklangan bo'lsa, qolgan sekundlarni qaytarish.
     Bloklangan bo'lmasa — 0.
     """
-    ttl = cache.ttl(f"otp_block:{phone}")
-    return ttl if ttl and ttl > 0 else 0
+    if hasattr(cache, 'ttl'):
+        try:
+            ttl = cache.ttl(f"otp_block:{phone}")
+            return ttl if ttl and ttl > 0 else 0
+        except Exception:
+            pass
+    if cache.get(f"otp_block:{phone}"):
+        return 900
+    return 0
 
 
 def can_send_otp(phone: str) -> tuple[bool, str]:
