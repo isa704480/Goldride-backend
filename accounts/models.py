@@ -140,6 +140,11 @@ class User(AbstractUser):
     # Anti-fraud fields
     device_id = models.CharField(max_length=255, blank=True, null=True)
     last_ip = models.GenericIPAddressField(blank=True, null=True)
+    registration_ip = models.GenericIPAddressField(
+        blank=True,
+        null=True,
+        verbose_name="Ro'yxatdan o'tgan IP"
+    )
     telegram_username = models.CharField(
         max_length=100, 
         blank=True, 

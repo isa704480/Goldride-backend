@@ -805,7 +805,7 @@ def google_auth_view(request):
     Endi mijoz Firebase'dan olingan `id_token` ni yuborishi SHART; server uni
     Firebase Admin SDK orqali tekshiradi va email'ni token ichidan oladi.
     """
-    from .utils import verify_firebase_id_token
+    from .utils import verify_firebase_id_token, get_client_ip
 
     id_token = request.data.get('id_token')
     if not id_token:
@@ -846,6 +846,11 @@ def google_auth_view(request):
         if not phone.startswith('+'):
             phone = '+' + phone
 
+        # IP cheklovi
+        ip = get_client_ip(request)
+        if ip and User.objects.filter(registration_ip=ip).exists():
+            return Response({'detail': 'Ushbu qurilmadan (IP) ro\'yxatdan o\'tish cheklangan.'}, status=400)
+
         # Yangi foydalanuvchi yaratish
         user, created = User.objects.get_or_create(
             phone=phone,
@@ -854,7 +859,8 @@ def google_auth_view(request):
                 'first_name': first_name,
                 'last_name': last_name,
                 'username': phone,
-                'is_verified': True
+                'is_verified': True,
+                'registration_ip': ip
             }
         )
         if created:
@@ -910,6 +916,12 @@ def email_auth_view(request):
         if not phone.startswith('+'):
             phone = '+' + phone
 
+        # IP cheklovi
+        from .utils import get_client_ip
+        ip = get_client_ip(request)
+        if ip and User.objects.filter(registration_ip=ip).exists():
+            return Response({'detail': 'Ushbu qurilmadan (IP) ro\'yxatdan o\'tish cheklangan.'}, status=400)
+
         # Yangi foydalanuvchi yaratish
         user, created = User.objects.get_or_create(
             phone=phone,
@@ -918,7 +930,8 @@ def email_auth_view(request):
                 'first_name': first_name,
                 'last_name': last_name,
                 'username': phone,
-                'is_verified': True
+                'is_verified': True,
+                'registration_ip': ip
             }
         )
         if created:

@@ -139,3 +139,13 @@ def send_feedback_to_telegram(phone, message):
             print(f"[Telegram Feedback] Error sending to {chat_id}: {e}")
             all_ok = False
     return all_ok
+
+
+def get_client_ip(request):
+    """Obtain client's IP address from request metadata."""
+    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    if x_forwarded_for:
+        ip = x_forwarded_for.split(',')[0].strip()
+    else:
+        ip = request.META.get('REMOTE_ADDR')
+    return ip
