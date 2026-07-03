@@ -36,11 +36,26 @@ User = get_user_model()
 @permission_classes([AllowAny])
 @throttle_classes([AuthThrottle])
 def send_otp_view(request):
-    """OTP yuborish BEKOR QILINDI — faqat Google bilan kirish ishlatiladi."""
-    return Response(
-        {'detail': 'OTP yuborish bekor qilindi. Goldride Google bilan kirishnigina ishlatadi.'},
-        status=410
-    )
+    """Send OTP code to user phone."""
+    phone = request.data.get('phone')
+    if not phone:
+        return Response({'detail': 'Telefon raqamini kiriting.'}, status=400)
+
+    if not phone.startswith('+'):
+        phone = '+' + phone
+
+    # Anti-spam/Throttling checks
+    allowed, message = can_send_otp(phone)
+    if not allowed:
+        return Response({'detail': message}, status=400)
+
+    try:
+        otp = send_otp(phone)
+        logger.info("OTP send success to %s: %s", phone, otp)
+        return Response({'detail': 'Tasdiqlash kodi yuborildi.'}, status=200)
+    except Exception as e:
+        logger.error("OTP yuborishda xato: %s", e)
+        return Response({'detail': 'Tizimda xatolik yuz berdi.'}, status=500)
 
 
 def is_name_weird(name):
@@ -89,11 +104,22 @@ def is_name_weird(name):
 @permission_classes([AllowAny])
 @throttle_classes([AuthThrottle])
 def verify_otp_view(request):
-    """OTP tasdiqlash BEKOR QILINDI — faqat Google bilan kirish ishlatiladi."""
-    return Response(
-        {'detail': 'OTP orqali kirish bekor qilindi. Goldride faqat Google bilan kirishnigina ishlatadi.'},
-        status=410
-    )
+    """Verify OTP and return JWT token."""
+    phone = request.data.get('phone')
+    otp = request.data.get('otp')
+    email = request.data.get('email')
+
+    if not phone or not otp:
+        return Response({'detail': 'Telefon raqami va OTP kodini kiriting.'}, status=400)
+
+    if not phone.startswith('+'):
+        phone = '+' + phone
+
+    is_valid = verify_otp(phone, otp)
+    if not is_valid:
+        return Response({'detail': "Tasdiqlash kodi noto'g'ri yoki uning muddati tugagan."}, status=400)
+
+    user = User.objects.filter(phone=phone).first()
     
     # --- ANTI-FRAUD CHECK ---
     device_id = request.data.get('device_id')
