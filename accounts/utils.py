@@ -116,7 +116,7 @@ def send_feedback_to_telegram(phone, message):
     chat_ids = [c.strip() for c in chat_ids_raw.split(',') if c.strip()]
 
     if not token or not chat_ids:
-        print("[Telegram Feedback] Missing FEEDBACK_BOT_TOKEN or FEEDBACK_CHAT_IDS")
+        logger.warning("[Feedback] FEEDBACK_BOT_TOKEN yoki FEEDBACK_CHAT_IDS sozlanmagan")
         return False
 
     text = (
@@ -133,10 +133,10 @@ def send_feedback_to_telegram(phone, message):
                 url, json={'chat_id': chat_id, 'text': text, 'parse_mode': 'HTML'}, timeout=5
             )
             if response.status_code != 200:
-                print(f"[Telegram Feedback] Error for chat {chat_id}: {response.text}")
+                logger.warning("[Feedback] Telegram xatosi (chat %s): %s", chat_id, response.text[:200])
                 all_ok = False
         except Exception as e:
-            print(f"[Telegram Feedback] Error sending to {chat_id}: {e}")
+            logger.warning("[Feedback] Telegram yuborishda xato (chat %s): %s", chat_id, e)
             all_ok = False
     return all_ok
 

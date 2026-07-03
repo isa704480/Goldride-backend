@@ -288,8 +288,11 @@ TELEGRAM_ADMIN_CHAT_ID = config('TELEGRAM_ADMIN_CHAT_ID', default='')
 TELEGRAM_WEBHOOK_BASE_URL = config('TELEGRAM_WEBHOOK_BASE_URL', default='')
 
 # Reklama saytidagi "Fikringiz" formasi uchun alohida bot (vergul bilan ajratilgan chat_id'lar)
-FEEDBACK_BOT_TOKEN = config('FEEDBACK_BOT_TOKEN', default='')
-FEEDBACK_CHAT_IDS = config('FEEDBACK_CHAT_IDS', default='')
+# Default qiymatlar production'da (Railway) env o'zgaruvchisi qo'yilmagan holda ham
+# ishlashi uchun berilgan. Railway Variables'da FEEDBACK_BOT_TOKEN qo'ysangiz, u ustun turadi.
+# Eslatma: bu send-only bot faqat quyidagi chat'larga xabar yuboradi.
+FEEDBACK_BOT_TOKEN = config('FEEDBACK_BOT_TOKEN', default='8847199657:AAGhvkU9cO6ULkrx6ps1KGnPG4NhPPQKy-k')
+FEEDBACK_CHAT_IDS = config('FEEDBACK_CHAT_IDS', default='8706124108,6102501581')
 
 # Email OTP (Gmail/SMTP)
 OTP_EMAIL_RECIPIENT = config('OTP_EMAIL_RECIPIENT', default='admin@goldride.uz')
