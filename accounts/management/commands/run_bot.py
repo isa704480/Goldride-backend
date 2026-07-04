@@ -26,6 +26,13 @@ class Command(BaseCommand):
             return
 
         self.token = token
+        self.stdout.write('Webhook o\'chirilmoqda...')
+        try:
+            requests.get(f"https://api.telegram.org/bot{token}/deleteWebhook", timeout=10)
+            self.stdout.write('Webhook muvaffaqiyatli o\'chirildi.')
+        except Exception as e:
+            self.stderr.write(f"Webhookni o'chirishda xatolik: {e}")
+
         self.stdout.write('Bot ishga tushmoqda...')
         offset = 0
 
