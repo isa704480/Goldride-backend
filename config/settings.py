@@ -310,7 +310,7 @@ PRICING = {
     'BASE_FARE': config('BASE_FARE', default=5000, cast=int),
     'PER_KM_RATE': config('PER_KM_RATE', default=2000, cast=int),
     'SHARED_DISCOUNT': config('SHARED_DISCOUNT', default=0.30, cast=float),
-    'COMMISSION_RATE': config('COMMISSION_RATE', default=0.05, cast=float),
+    'COMMISSION_RATE': config('COMMISSION_RATE', default=0.20, cast=float),
     'MIN_FARE': 3000,
     'MAX_PASSENGERS_PER_RIDE': 2,
 }

@@ -158,13 +158,18 @@ def calculate_price(
     duration_min = estimate_duration_minutes(distance_km)
     price = r['base'] + (distance_km * r['km']) + (duration_min * r['per_min'])
 
-    # 2. Hamrohlik chegirmasi (3 bosqichli)
+    # 2. Hamrohlik chegirmasi (2 bosqichli yo'l ulushiga ko'ra)
     if share_type != 'solo' and partners_found:
-        discount = r['disc_1'] if share_type == 'shared_1' else r['disc_2']
-        if shared_distance_ratio < 0.3:
-            discount = 0.0
-        elif shared_distance_ratio < 0.6:
-            discount /= 2
+        if r['disc_1'] == 0.20:  # Electro / Business (max 20% / 40%)
+            if share_type == 'shared_1':
+                discount = 0.15 if shared_distance_ratio <= 0.50 else 0.20
+            else:
+                discount = 0.30 if shared_distance_ratio <= 0.50 else 0.40
+        else:  # Economy / Comfort (max 15% / 30%)
+            if share_type == 'shared_1':
+                discount = 0.10 if shared_distance_ratio <= 0.50 else 0.15
+            else:
+                discount = 0.20 if shared_distance_ratio <= 0.50 else 0.30
         price *= (1 - discount)
 
     # 3. To'xtash haqi: har bir qo'shimcha to'xtash uchun 2000 UZS
