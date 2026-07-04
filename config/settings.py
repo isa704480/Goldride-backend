@@ -275,7 +275,7 @@ CORS_ALLOW_CREDENTIALS = False
 
 # OTP Settings
 OTP_EXPIRY_SECONDS = config('OTP_EXPIRY_SECONDS', default=300, cast=int)
-OTP_LENGTH = config('OTP_LENGTH', default=4, cast=int)
+OTP_LENGTH = config('OTP_LENGTH', default=6, cast=int)
 
 # OTP — Google (Firebase) asosiy, SMS o'chirildi
 # OTP_PROVIDER = config('OTP_PROVIDER', default='simulation')
