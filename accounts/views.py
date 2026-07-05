@@ -1863,3 +1863,48 @@ def taxi_park_stats_view(request):
         'total_commission': int(earnings['commission'] or 0),
         'daily': daily_data,
     })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def submit_referral_code_view(request):
+    """Submit a referral code to link referrer and get bonus."""
+    user = request.user
+    referral_code = request.data.get('referral_code')
+
+    if not referral_code:
+        return Response({'detail': 'Promokod kiritilishi shart.'}, status=400)
+
+    if user.referred_by:
+        return Response({'detail': 'Siz allaqachon taklif kodini kiritgansiz.'}, status=400)
+
+    # Clean up the input referral code
+    referral_code = referral_code.strip().upper()
+
+    # Find the referrer user
+    from accounts.models import User as UserAccount
+    referrer = UserAccount.objects.filter(referral_code=referral_code).first()
+    if not referrer:
+        return Response({'detail': "Bunday promokod topilmadi. Iltimos, tekshirib qaytadan yozing."}, status=400)
+
+    if referrer == user:
+        return Response({'detail': "O'zingizning promokodingizni kiritolmaysiz."}, status=400)
+
+    # Link the users
+    from decimal import Decimal
+    user.referred_by = referrer
+    if user.bonus_balance is None:
+        user.bonus_balance = Decimal('0')
+    user.bonus_balance += Decimal('20000') # Give 20k bonus as advertised
+    user.save(update_fields=['referred_by', 'bonus_balance'])
+
+    # Update/create wallet and deposit the bonus
+    from accounts.models import Wallet
+    wallet, _ = Wallet.objects.get_or_create(user=user)
+    wallet.deposit(20000, f"{referrer.first_name or 'Do`st'} tomonidan taklif bonusi")
+
+    return Response({
+        'detail': 'Promokod muvaffaqiyatli qabul qilindi va 20 000 UZS bonus balansingizga qo`shildi!',
+        'bonus_balance': float(user.bonus_balance)
+    })
+

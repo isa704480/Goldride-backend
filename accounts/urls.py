@@ -24,6 +24,7 @@ urlpatterns = [
 
     # Profile
     path('profile/', views.UserProfileView.as_view(), name='user-profile'),
+    path('profile/submit-referral/', views.submit_referral_code_view, name='submit-referral-code'),
     path('driver/profile/', views.DriverProfileView.as_view(), name='driver-profile'),
     path('driver/toggle-status/', views.toggle_driver_status, name='toggle-driver-status'),
     path('driver/location/', views.update_driver_location, name='update-driver-location'),

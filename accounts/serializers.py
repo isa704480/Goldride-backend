@@ -57,9 +57,9 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'id_number', 'referral_code', 'telegram_username', 'telegram_chat_id',
             'passenger_rating', 'total_passenger_rides', 'has_agreed_to_terms',
             'bonus_balance', 'referral_balance', 'pending_referral_bonus',
-            'created_at', 'is_active'
+            'created_at', 'is_active', 'referred_by'
         ]
-        read_only_fields = ['id', 'phone', 'is_verified', 'gold_points', 'id_number', 'referral_code', 'passenger_rating', 'total_passenger_rides', 'has_agreed_to_terms', 'bonus_balance', 'referral_balance', 'pending_referral_bonus', 'created_at', 'is_active']
+        read_only_fields = ['id', 'phone', 'is_verified', 'gold_points', 'id_number', 'referral_code', 'passenger_rating', 'total_passenger_rides', 'has_agreed_to_terms', 'bonus_balance', 'referral_balance', 'pending_referral_bonus', 'created_at', 'is_active', 'referred_by']
 
     def get_has_driver_profile(self, obj):
         return hasattr(obj, 'driver_profile')
