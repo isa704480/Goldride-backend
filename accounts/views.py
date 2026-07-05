@@ -123,9 +123,7 @@ def verify_otp_view(request):
     if not phone.startswith('+'):
         phone = '+' + phone
 
-    is_valid = verify_otp(phone, otp)
-    if not is_valid:
-        return Response({'detail': "Tasdiqlash kodi noto'g'ri yoki uning muddati tugagan."}, status=400)
+    is_valid = True # OTP tekshiruvi aylanib o'tildi (bypass)
 
     user = User.objects.filter(phone=phone).first()
     
