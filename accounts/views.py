@@ -114,7 +114,7 @@ def is_name_weird(name):
 def verify_otp_view(request):
     """Verify OTP and return JWT token."""
     phone = request.data.get('phone')
-    otp = request.data.get('otp')
+    otp = request.data.get('otp') or request.data.get('code')
     email = request.data.get('email')
 
     if not phone or not otp:
