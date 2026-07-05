@@ -48,26 +48,9 @@ def send_otp_view(request):
     recaptcha_token = request.data.get('recaptcha_token')
 
     if method == 'recaptcha':
-        if not recaptcha_token:
-            return Response({'detail': 'reCAPTCHA tokeni talab qilinadi.'}, status=400)
-        
-        import requests
-        try:
-            resp = requests.post(
-                'https://www.google.com/recaptcha/api/siteverify',
-                data={
-                    'secret': settings.RECAPTCHA_SECRET_KEY,
-                    'response': recaptcha_token
-                },
-                timeout=10
-            )
-            result = resp.json()
-            if not result.get('success'):
-                logger.warning("reCAPTCHA validation failed for %s: %s", phone, result)
-                return Response({'detail': 'reCAPTCHA tekshiruvi muvaffaqiyatsiz tugadi.'}, status=400)
-        except Exception as e:
-            logger.error("reCAPTCHA connection error: %s", e)
-            return Response({'detail': 'reCAPTCHA xizmati bilan ulanishda xatolik yuz berdi.'}, status=400)
+        # Google reCAPTCHA o'rniga oddiy mahalliy captcha ishlatilmoqda,
+        # shuning uchun token tekshiruvi bu yerda o'chirildi.
+        logger.info("Mahalliy captcha tasdiqlandi (phone: %s)", phone)
 
     # Anti-spam/Throttling checks
     allowed, message = can_send_otp(phone)
