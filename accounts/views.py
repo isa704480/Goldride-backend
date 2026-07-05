@@ -165,9 +165,23 @@ def verify_otp_view(request):
         missing_fields.append('last_name')
 
     if missing_fields:
+        # Yangi foydalanuvchilar profilni to'ldirishi uchun JWT tokenlar qaytaramiz (auth uchun)
+        user, created = User.objects.get_or_create(
+            phone=phone,
+            defaults={
+                'username': phone,
+                'device_id': device_id,
+                'last_ip': ip,
+                'is_verified': True
+            }
+        )
+        refresh = RefreshToken.for_user(user)
         return Response({
             'detail': 'Profilni yakunlash kerak.',
             'status': 'partial',
+            'access': str(refresh.access_token),
+            'refresh': str(refresh),
+            'user': UserProfileSerializer(user).data,
             'missing_fields': missing_fields,
             'prefill': {
                 'phone': phone,
