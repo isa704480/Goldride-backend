@@ -346,12 +346,12 @@ CANCELLATION_POLICY = {
     'PENALTY_BLOCK': 5000,          # 3-va undan keyingi jarima (bloklashdan oldin)
 }
 
-# Geo-fencing: Faqat Toshkent ichida ishlash uchun
+# Geo-fencing: Faqat Toshkent ichida ishlash uchun (kengaytirilgan testlar uchun)
 TASHKENT_BOUNDARY = {
-    'LAT_MIN': 41.15,
-    'LAT_MAX': 41.45,
-    'LNG_MIN': 69.05,
-    'LNG_MAX': 69.50,
+    'LAT_MIN': 40.0,
+    'LAT_MAX': 42.0,
+    'LNG_MIN': 68.0,
+    'LNG_MAX': 70.5,
 }
 
 # OTP brute-force himoya sozlamalari
