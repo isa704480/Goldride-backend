@@ -342,10 +342,13 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
         if is_first_completion:
             from django.conf import settings as conf_settings
             from accounts.models import Wallet
-            # Get bonus amount from settings (default 20000)
-            bonus_amount = 20000
-            if hasattr(conf_settings, 'DRIVER_BALANCE'):
-                bonus_amount = conf_settings.DRIVER_BALANCE.get('SIGNUP_BONUS', 20000)
+            
+            if user.role == 'driver':
+                bonus_amount = 50000
+                if hasattr(conf_settings, 'DRIVER_BALANCE'):
+                    bonus_amount = conf_settings.DRIVER_BALANCE.get('SIGNUP_BONUS', 50000)
+            else:
+                bonus_amount = 20000
                 
             wallet, _ = Wallet.objects.get_or_create(user=user)
             wallet.deposit(bonus_amount, "Xush kelibsiz bonusi")
@@ -1907,4 +1910,3 @@ def submit_referral_code_view(request):
         'detail': 'Promokod muvaffaqiyatli qabul qilindi va 20 000 UZS bonus balansingizga qo`shildi!',
         'bonus_balance': float(user.bonus_balance)
     })
-
