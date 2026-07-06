@@ -151,6 +151,17 @@ def verify_otp_view(request):
             'user': UserProfileSerializer(user).data
         })
 
+    # --- TAKRORIY AKKAUNT TEKSHIRUVI ---
+    # Bu yerga yetdik => shu telefon bilan akkaunt YO'Q, ya'ni yangi ro'yxatdan o'tish.
+    # Agar shu IP'dan allaqachon akkaunt ochilgan bo'lsa — bloklaymiz (bir qurilma = bitta akkaunt).
+    # Mavjud foydalanuvchi (yuqorida) istalgan IP'dan kira oladi; bu faqat YANGI akkauntga taalluqli.
+    if ip and User.objects.filter(registration_ip=ip).exists():
+        logger.info("Takroriy akkaunt urinishi bloklandi — IP: %s, telefon: %s", ip, phone)
+        return Response({
+            'detail': 'Sizda allaqachon akkaunt mavjud — bu telefondan ro\'yxatdan '
+                      'o\'tgansiz. Har bir qurilmadan faqat bitta akkaunt ochish mumkin.'
+        }, status=409)
+
     # If new user, we need to gather data
     first_name = request.data.get('first_name', '')
     last_name = request.data.get('last_name', '')
@@ -172,6 +183,7 @@ def verify_otp_view(request):
                 'username': phone,
                 'device_id': device_id,
                 'last_ip': ip,
+                'registration_ip': ip,
                 'is_verified': True
             }
         )
@@ -202,6 +214,7 @@ def verify_otp_view(request):
             'username': phone,
             'device_id': device_id,
             'last_ip': ip,
+            'registration_ip': ip,
             'is_verified': True
         }
     )
@@ -989,7 +1002,10 @@ def google_auth_view(request):
         # IP cheklovi
         ip = get_client_ip(request)
         if ip and User.objects.filter(registration_ip=ip).exists():
-            return Response({'detail': 'Ushbu qurilmadan (IP) ro\'yxatdan o\'tish cheklangan.'}, status=400)
+            return Response({
+                'detail': 'Sizda allaqachon akkaunt mavjud — bu telefondan ro\'yxatdan '
+                          'o\'tgansiz. Har bir qurilmadan faqat bitta akkaunt ochish mumkin.'
+            }, status=409)
 
         # Yangi foydalanuvchi yaratish
         user, created = User.objects.get_or_create(
@@ -1060,7 +1076,10 @@ def email_auth_view(request):
         from .utils import get_client_ip
         ip = get_client_ip(request)
         if ip and User.objects.filter(registration_ip=ip).exists():
-            return Response({'detail': 'Ushbu qurilmadan (IP) ro\'yxatdan o\'tish cheklangan.'}, status=400)
+            return Response({
+                'detail': 'Sizda allaqachon akkaunt mavjud — bu telefondan ro\'yxatdan '
+                          'o\'tgansiz. Har bir qurilmadan faqat bitta akkaunt ochish mumkin.'
+            }, status=409)
 
         # Yangi foydalanuvchi yaratish
         user, created = User.objects.get_or_create(
