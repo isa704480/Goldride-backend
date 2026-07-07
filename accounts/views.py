@@ -125,6 +125,28 @@ def is_name_weird(name):
 )
 @api_view(['POST'])
 @permission_classes([AllowAny])
+def check_email_view(request):
+    """Email band emasligini tekshirish (telefon kiritishdan OLDIN).
+
+    Foydalanuvchi emailni yozganda chaqiriladi:
+      - email bo'sh yoki noto'g'ri format → {'available': False, 'detail': ...}
+      - email allaqachon akkauntda bor → {'available': False, 'detail': "band"}
+      - bo'sh (yangi) → {'available': True}
+    """
+    email = (request.data.get('email') or '').strip().lower()
+    if not email or '@' not in email or '.' not in email.split('@')[-1]:
+        return Response({'available': False, 'detail': 'To\'g\'ri email kiriting.'}, status=200)
+    taken = User.objects.filter(email__iexact=email).exists()
+    if taken:
+        return Response({
+            'available': False,
+            'detail': 'Bu email bilan allaqachon akkaunt ochilgan.'
+        }, status=200)
+    return Response({'available': True}, status=200)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
 @throttle_classes([AuthThrottle])
 def verify_otp_view(request):
     """Verify OTP and return JWT token."""
@@ -167,24 +189,29 @@ def verify_otp_view(request):
             'user': UserProfileSerializer(user).data
         })
 
-    # --- TAKRORIY AKKAUNT TEKSHIRUVI (3 belgi: telefon + IP + qurilma) ---
-    # Bu yerga yetdik => shu TELEFON bilan akkaunt YO'Q (telefon o'zi unikal — 1-belgi).
-    # Yana ikki belgi bo'yicha tekshiramiz:
-    #   - IP manzil (registration_ip) — tarmoq darajasi
-    #   - device_id (qurilma) — "o'sha telefonda chiqib ketib qayta ochmoqchi" holati
-    # Ikkalasidan biri mavjud akkauntga mos kelsa — bloklaymiz va adminga xabar beramiz.
-    # Mavjud foydalanuvchi (yuqorida) istalgan IP/qurilmadan kira oladi; bu faqat YANGI akkauntga.
+    # --- TAKRORIY AKKAUNT TEKSHIRUVI ---
+    # Bu yerga yetdik => shu TELEFON bilan akkaunt YO'Q (telefon o'zi unikal).
+    #
+    # ASOSIY DARVOZA — EMAIL: bir email = bir akkaunt. Email boshqa akkauntda
+    # ishlatilgan bo'lsa — bloklaymiz. Boshqa (yangi) email bo'lsa — o'tkazamiz.
+    if email:
+        email_norm = email.strip().lower()
+        if email_norm and User.objects.filter(email__iexact=email_norm).exclude(phone=phone).exists():
+            logger.info("Takroriy akkaunt bloklandi — email takrorlandi: %s (telefon %s)", email_norm, phone)
+            _notify_admin_blocked_signup(phone, ip, reason=f'Email takrorlandi: {email_norm}')
+            return Response({
+                'detail': 'Bu email bilan allaqachon akkaunt ochilgan. Boshqa email kiriting '
+                          'yoki mavjud akkauntingizga kiring.'
+            }, status=409)
+
+    # IP/qurilma endi QATTIQ bloklamaydi (bir uy/ofis tarmog'i yoki test qilishga
+    # xalaqit bermasin — email asosiy darvoza). Shubhali bo'lsa faqat log qilamiz.
     dup_by_device = bool(device_id) and User.objects.filter(device_id=device_id).exists()
     dup_by_ip = bool(ip) and User.objects.filter(registration_ip=ip).exists()
     if dup_by_device or dup_by_ip:
-        reason = 'Qurilma (device_id) takrorlandi' if dup_by_device else 'IP takrorlandi'
-        logger.info("Takroriy akkaunt bloklandi — %s | telefon: %s, IP: %s, device: %s",
+        reason = 'qurilma (device_id)' if dup_by_device else 'IP'
+        logger.info("Shubhali ro'yxatdan o'tish (bloklanmadi, %s takrorlandi) — telefon: %s, IP: %s, device: %s",
                     reason, phone, ip, device_id)
-        _notify_admin_blocked_signup(phone, ip, reason=reason)
-        return Response({
-            'detail': 'Sizda allaqachon akkaunt mavjud — bu telefon/qurilmadan ro\'yxatdan '
-                      'o\'tgansiz. Har bir qurilmadan faqat bitta akkaunt ochish mumkin.'
-        }, status=409)
 
     # If new user, we need to gather data
     first_name = request.data.get('first_name', '')
@@ -205,6 +232,7 @@ def verify_otp_view(request):
             phone=phone,
             defaults={
                 'username': phone,
+                'email': (email or '').strip().lower(),
                 'device_id': device_id,
                 'last_ip': ip,
                 'registration_ip': ip,

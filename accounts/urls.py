@@ -5,6 +5,7 @@ from . import views
 urlpatterns = [
     # OTP Auth
     path('send-otp/', views.send_otp_view, name='send-otp'),
+    path('check-email/', views.check_email_view, name='check-email'),
     path('verify-otp/', views.verify_otp_view, name='verify-otp'),
     path('login-direct/', views.login_direct_view, name='login-direct'),
     path('admin/login/', views.admin_login_view, name='admin-login'),
