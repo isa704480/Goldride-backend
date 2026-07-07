@@ -277,6 +277,12 @@ else:
         CORS_ALLOWED_ORIGINS += [o.strip() for o in _extra_cors.split(',') if o.strip()]
 CORS_ALLOW_CREDENTIALS = False
 
+# Standart CORS header'lariga o'zimizning X-Device-Id header'imizni qo'shamiz
+# (aks holda web/brauzer versiyasida preflight uni bloklaydi — takroriy akkaunt
+# aniqlash uchun mobil ilova bu header'ni yuboradi).
+from corsheaders.defaults import default_headers
+CORS_ALLOW_HEADERS = list(default_headers) + ['x-device-id']
+
 # OTP Settings
 OTP_EXPIRY_SECONDS = config('OTP_EXPIRY_SECONDS', default=300, cast=int)
 OTP_LENGTH = config('OTP_LENGTH', default=6, cast=int)
