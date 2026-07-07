@@ -32,6 +32,21 @@ logger = logging.getLogger('accounts')
 User = get_user_model()
 
 
+def _notify_admin_blocked_signup(phone, ip, reason='IP takrorlandi'):
+    """Bloklangan takroriy ro'yxatdan o'tish urinishini admin Telegram'iga yuboradi.
+    Xato bo'lsa ham ro'yxatdan o'tish oqimini to'xtatmaydi (jimgina log qiladi)."""
+    try:
+        from .utils import send_telegram_notification
+        send_telegram_notification(
+            "\U0001F6AB <b>Takroriy akkaunt urinishi bloklandi</b>\n"
+            f"\U0001F4DE Telefon: {phone}\n"
+            f"\U0001F310 IP: {ip}\n"
+            f"ℹ️ Sabab: {reason}"
+        )
+    except Exception as e:
+        logger.warning("Admin blok-xabari yuborilmadi: %s", e)
+
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 @throttle_classes([AuthThrottle])
@@ -157,6 +172,7 @@ def verify_otp_view(request):
     # Mavjud foydalanuvchi (yuqorida) istalgan IP'dan kira oladi; bu faqat YANGI akkauntga taalluqli.
     if ip and User.objects.filter(registration_ip=ip).exists():
         logger.info("Takroriy akkaunt urinishi bloklandi — IP: %s, telefon: %s", ip, phone)
+        _notify_admin_blocked_signup(phone, ip)
         return Response({
             'detail': 'Sizda allaqachon akkaunt mavjud — bu telefondan ro\'yxatdan '
                       'o\'tgansiz. Har bir qurilmadan faqat bitta akkaunt ochish mumkin.'
@@ -1002,6 +1018,7 @@ def google_auth_view(request):
         # IP cheklovi
         ip = get_client_ip(request)
         if ip and User.objects.filter(registration_ip=ip).exists():
+            _notify_admin_blocked_signup(phone or email, ip)
             return Response({
                 'detail': 'Sizda allaqachon akkaunt mavjud — bu telefondan ro\'yxatdan '
                           'o\'tgansiz. Har bir qurilmadan faqat bitta akkaunt ochish mumkin.'
@@ -1076,6 +1093,7 @@ def email_auth_view(request):
         from .utils import get_client_ip
         ip = get_client_ip(request)
         if ip and User.objects.filter(registration_ip=ip).exists():
+            _notify_admin_blocked_signup(phone or email, ip)
             return Response({
                 'detail': 'Sizda allaqachon akkaunt mavjud — bu telefondan ro\'yxatdan '
                           'o\'tgansiz. Har bir qurilmadan faqat bitta akkaunt ochish mumkin.'
