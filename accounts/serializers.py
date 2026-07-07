@@ -122,6 +122,11 @@ class DriverRegistrationSerializer(serializers.Serializer):
             from .models import TaxiPark
             selected_park = TaxiPark.objects.filter(id=taxi_park_id, status='approved').first()
 
+        # YANGI haydovchi HAR DOIM 'pending' — tasdiqlanishi kerak:
+        #   - park tanlangan bo'lsa: park egasi tasdiqlaydi (taxi_park_approve_driver_view)
+        #   - park tanlanmagan (solo) bo'lsa: admin tasdiqlaydi (admin_driver_action)
+        # Kirish bonusi FAQAT tasdiqlangandan keyin beriladi (u yerda deposit qilinadi),
+        # shuning uchun bu yerda bonus BERILMAYDI (aks holda ikki marta tushardi).
         driver = Driver.objects.create(
             user=user,
             license_number=validated_data['license_number'],
@@ -132,18 +137,12 @@ class DriverRegistrationSerializer(serializers.Serializer):
             face_id_photo=validated_data.get('face_id_photo'),
             taxi_license_photo=validated_data.get('taxi_license_photo'),
             taxi_park=selected_park,
-            status='approved'
+            status='pending',
         )
 
-        # Give welcome signup bonus to wallet
-        from django.conf import settings as conf_settings
+        # Hamyon yaratamiz (bonus tasdiqda tushadi)
         from accounts.models import Wallet
-        bonus = 50000
-        if hasattr(conf_settings, 'DRIVER_BALANCE') and 'SIGNUP_BONUS' in conf_settings.DRIVER_BALANCE:
-            bonus = conf_settings.DRIVER_BALANCE['SIGNUP_BONUS']
-        
-        wallet, _ = Wallet.objects.get_or_create(user=user)
-        wallet.deposit(bonus, f"Yangi haydovchi bonusi ({bonus:,} UZS)")
+        Wallet.objects.get_or_create(user=user)
 
         Vehicle.objects.create(
             driver=driver,

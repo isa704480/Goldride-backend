@@ -3,12 +3,12 @@ Goldride — Cashback va Bonus tizimi
 
 Mijoz qoidalari:
   - 1-5 safar:  karta → 40% keshbek,  naqd → 15% keshbek
-  - 6+ safar:   2% doimiy keshbek (istalgan to'lov)
+  - 6+ safar:   karta → 2%,  naqd → 1% keshbek
   - Bonuslar 6-safardan boshlab ishlatish mumkin
   - Maksimum 70% to'lovni bonusdan to'lash mumkin
 
 Do'st taklif qoidalari:
-  - Do'stining har safaridan: naqd → 1%, karta → 2% bonus
+  - Do'stining HAR safaridan: naqd → 1%, karta → 2% bonus
   - Bonuslar ERTANGI KUN tushadi (pending_referral_bonus orqali)
   - Referral bonusni kartaga yechish: 2% komissiya, min 1000 UZS qolishi kerak
 
@@ -36,7 +36,8 @@ logger = logging.getLogger('accounts')
 
 CASHBACK_INTRO_CARD = Decimal('0.40')   # 1-5 safar, karta
 CASHBACK_INTRO_CASH = Decimal('0.15')   # 1-5 safar, naqd
-CASHBACK_REGULAR   = Decimal('0.02')    # 6+ safar
+CASHBACK_REGULAR_CARD = Decimal('0.02')  # 6+ safar, karta → 2%
+CASHBACK_REGULAR_CASH = Decimal('0.01')  # 6+ safar, naqd → 1%
 INTRO_RIDE_LIMIT   = 5                  # Kirish davri buyurtmalar soni
 MAX_BONUS_USAGE    = Decimal('0.70')    # Bonusdan maksimal foydalanish ulushi
 
@@ -55,8 +56,10 @@ def get_passenger_cashback_rate(user, payment_method: str) -> Decimal:
     ride_num = (user.total_passenger_rides or 0) + 1
 
     if ride_num > INTRO_RIDE_LIMIT:
-        return CASHBACK_REGULAR
+        # 6+ safar: naqd → 1%, karta → 2%
+        return CASHBACK_REGULAR_CARD if payment_method == 'card' else CASHBACK_REGULAR_CASH
 
+    # 1-5 safar: karta → 40%, naqd → 15%
     if payment_method == 'card':
         return CASHBACK_INTRO_CARD
     return CASHBACK_INTRO_CASH
@@ -101,12 +104,8 @@ def queue_referral_bonus(referrer, passenger, fare: Decimal, payment_method: str
     """
     from accounts.models import ReferralEarning
 
-    rides_count = (passenger.referral_rides_count or 0) + 1
-    if rides_count <= 10:
-        rate = Decimal('0.05')
-    else:
-        rate = REFERRAL_BONUS_CARD if payment_method == 'card' else REFERRAL_BONUS_CASH
-        
+    # Do'stning HAR safaridan: naqd → 1%, karta → 2%
+    rate = REFERRAL_BONUS_CARD if payment_method == 'card' else REFERRAL_BONUS_CASH
     bonus = (fare * rate).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
 
     if bonus <= 0:
