@@ -32,6 +32,26 @@ logger = logging.getLogger('accounts')
 User = get_user_model()
 
 
+from rest_framework_simplejwt.views import TokenRefreshView as _BaseTokenRefreshView
+from rest_framework_simplejwt.exceptions import TokenError, InvalidToken
+from django.core.exceptions import ObjectDoesNotExist
+
+
+class SafeTokenRefreshView(_BaseTokenRefreshView):
+    """Token yangilash — lekin foydalanuvchi o'chirilgan/topilmagan bo'lsa 500 emas, 401 qaytaradi.
+
+    Standart TokenRefreshView foydalanuvchi mavjud bo'lmasa DoesNotExist ko'taradi (DRF uni
+    ushlamaydi → 500). Bunday holda mijoz sessiyani tozalab qayta kirishi kerak — 401 beramiz."""
+
+    def post(self, request, *args, **kwargs):
+        try:
+            return super().post(request, *args, **kwargs)
+        except (TokenError, InvalidToken):
+            return Response({'detail': 'Token yaroqsiz. Qaytadan kiring.'}, status=401)
+        except ObjectDoesNotExist:
+            return Response({'detail': 'Foydalanuvchi topilmadi. Qaytadan kiring.'}, status=401)
+
+
 def _notify_admin_blocked_signup(phone, ip, reason='IP takrorlandi'):
     """Bloklangan takroriy ro'yxatdan o'tish urinishini admin Telegram'iga yuboradi.
     Xato bo'lsa ham ro'yxatdan o'tish oqimini to'xtatmaydi (jimgina log qiladi)."""
@@ -1968,12 +1988,19 @@ def submit_referral_code_view(request):
             status=400
         )
 
-    # Clean up the input referral code
-    referral_code = referral_code.strip().upper()
+    # Kiritilgan kodni normallashtiramiz (bo'sh joy/registrsiz)
+    raw = referral_code.strip().upper().replace(' ', '')
 
-    # Find the referrer user
+    # Kodni bir necha ko'rinishda qidiramiz — foydalanuvchi 'GOLD123456',
+    # '123456' yoki kichik harflarda yozgan bo'lsa ham topilsin.
     from accounts.models import User as UserAccount
-    referrer = UserAccount.objects.filter(referral_code=referral_code).first()
+    referrer = UserAccount.objects.filter(referral_code=raw).first()
+    if not referrer and not raw.startswith('GOLD'):
+        referrer = UserAccount.objects.filter(referral_code=f'GOLD{raw}').first()
+    if not referrer:
+        digits = raw.replace('GOLD', '')
+        if digits.isdigit():
+            referrer = UserAccount.objects.filter(id_number=digits).first()
     if not referrer:
         return Response({'detail': "Bunday promokod topilmadi. Iltimos, tekshirib qaytadan yozing."}, status=400)
 
