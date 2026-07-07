@@ -222,6 +222,12 @@ class TaxiPark(models.Model):
     api_token = models.CharField(max_length=64, unique=True, blank=True, verbose_name='API token')
     password = models.CharField(max_length=128, blank=True, verbose_name='Parol')
 
+    # Yangi haydovchi park'ni tanlaganda Telegram xabari yuboriladi (ixtiyoriy)
+    telegram_chat_id = models.CharField(
+        max_length=32, blank=True, verbose_name='Telegram chat ID',
+        help_text='Park egasi yangi haydovchi so\'rovlari haqida shu chatga xabar oladi.'
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -144,6 +144,15 @@ class DriverRegistrationSerializer(serializers.Serializer):
         from accounts.models import Wallet
         Wallet.objects.get_or_create(user=user)
 
+        # Park tanlangan bo'lsa — park egasiga xabar beramiz
+        if selected_park:
+            from accounts.utils import notify_park_new_driver
+            notify_park_new_driver(
+                selected_park,
+                f"{user.first_name} {user.last_name}".strip() or user.phone,
+                user.phone,
+            )
+
         Vehicle.objects.create(
             driver=driver,
             make=validated_data['make'],

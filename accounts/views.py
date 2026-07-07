@@ -480,7 +480,12 @@ def register_driver_public_view(request):
     # Create user Wallet (will be funded upon admin approval)
     from accounts.models import Wallet
     Wallet.objects.get_or_create(user=user)
-    
+
+    # Park tanlangan bo'lsa — park egasiga xabar beramiz
+    if selected_park:
+        from .utils import notify_park_new_driver
+        notify_park_new_driver(selected_park, f"{first_name} {last_name}", phone)
+
     park_msg = f" '{selected_park.name}' taksi parkiga yuborildi." if selected_park else ''
     return Response(
         {'detail': f'Muvaffaqiyatli ro\'yxatdan o\'tdingiz.{park_msg} Tez orada admin tasdiqlaydi.'},
@@ -1803,7 +1808,7 @@ def taxi_park_update_profile_view(request):
         return Response({'detail': 'Token yaroqsiz.'}, status=401)
 
     data = request.data
-    allowed_fields = ['name', 'contact_person', 'address', 'inn', 'description']
+    allowed_fields = ['name', 'contact_person', 'address', 'inn', 'description', 'telegram_chat_id']
     changed = []
     for field in allowed_fields:
         if field in data and data[field] is not None:
@@ -1817,6 +1822,7 @@ def taxi_park_update_profile_view(request):
         'id': park.id, 'name': park.name, 'phone': park.phone,
         'contact_person': park.contact_person, 'address': park.address,
         'inn': park.inn, 'description': getattr(park, 'description', ''),
+        'telegram_chat_id': getattr(park, 'telegram_chat_id', ''),
         'driver_count': park.driver_count, 'status': park.status,
     })
 
@@ -1917,6 +1923,14 @@ def submit_referral_code_view(request):
 
     if user.referred_by:
         return Response({'detail': 'Siz allaqachon taklif kodini kiritgansiz.'}, status=400)
+
+    # Yo'lovchi taklif kodi orqali HAYDOVCHINI taklif qilib bo'lmaydi.
+    # Haydovchilar o'z alohida haydovchi-referal tizimidan foydalanadi.
+    if getattr(user, 'role', None) == 'driver' or hasattr(user, 'driver_profile'):
+        return Response(
+            {'detail': 'Haydovchilar yo\'lovchi taklif kodini ishlata olmaydi.'},
+            status=400
+        )
 
     # Clean up the input referral code
     referral_code = referral_code.strip().upper()

@@ -108,6 +108,25 @@ def send_telegram_notification(message, chat_id=None):
         return False
 
 
+def notify_park_new_driver(park, driver_name, driver_phone=''):
+    """Yangi haydovchi park'ni tanlaganda park egasiga Telegram xabari yuboradi.
+
+    Park'da telegram_chat_id bo'lsa — o'sha chatga; bo'lmasa — jimgina o'tadi
+    (haydovchi baribir park portalidagi 'kutilayotganlar' ro'yxatida ko'rinadi).
+    """
+    chat_id = getattr(park, 'telegram_chat_id', '') or ''
+    if not chat_id:
+        return False
+    text = (
+        "\U0001F695 <b>Yangi haydovchi so'rovi</b>\n\n"
+        f"Park: {park.name}\n"
+        f"Haydovchi: {driver_name}\n"
+        f"Telefon: {driver_phone}\n\n"
+        "Park portalingizdan tasdiqlang yoki rad eting."
+    )
+    return send_telegram_notification(text, chat_id=chat_id)
+
+
 def send_feedback_to_telegram(phone, message):
     """Reklama saytidagi fikr-mulohaza formasidan kelgan xabarni
     alohida sozlangan Telegram bot orqali bir nechta chat'ga yuboradi."""
