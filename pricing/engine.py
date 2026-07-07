@@ -6,6 +6,40 @@ from .models import PricingRule
 
 logger = logging.getLogger('pricing')
 
+# Avtomobil klasslari bo'yicha standart tariflar (DB bo'sh bo'lsa ishlatiladi).
+# Admin panel orqali PricingRule.categories'da o'zgartiriladi.
+DEFAULT_TARIFF_RATES = {
+    'economy':  {'base': 6000, 'km': 1500, 'per_min': 200, 'disc_1': 0.15, 'disc_2': 0.30},
+    'comfort':  {'base': 7000, 'km': 2000, 'per_min': 250, 'disc_1': 0.15, 'disc_2': 0.30},
+    'electro':  {'base': 7500, 'km': 2300, 'per_min': 280, 'disc_1': 0.20, 'disc_2': 0.40},
+    'business': {'base': 10000,'km': 2800, 'per_min': 350, 'disc_1': 0.20, 'disc_2': 0.40},
+}
+
+
+def get_tariff_rates():
+    """Klass tariflarini admin sozlamalaridan (PricingRule.categories) oladi.
+    Bo'sh yoki xato bo'lsa — DEFAULT_TARIFF_RATES qaytaradi. Har bir klass uchun
+    yetishmayotgan kalitlar standart qiymat bilan to'ldiriladi (xavfsizlik uchun)."""
+    try:
+        rule = PricingRule.objects.filter(is_active=True).first() or PricingRule.objects.first()
+        cats = getattr(rule, 'categories', None) if rule else None
+        if not cats:
+            return DEFAULT_TARIFF_RATES
+        merged = {}
+        for key, default in DEFAULT_TARIFF_RATES.items():
+            c = cats.get(key, {}) if isinstance(cats, dict) else {}
+            merged[key] = {
+                'base': int(c.get('base', default['base'])),
+                'km': int(c.get('km', default['km'])),
+                'per_min': int(c.get('per_min', default['per_min'])),
+                'disc_1': float(c.get('disc_1', default['disc_1'])),
+                'disc_2': float(c.get('disc_2', default['disc_2'])),
+            }
+        return merged
+    except Exception as e:
+        logger.warning("Tarif sozlamalarini o'qishda xato, standart ishlatilmoqda: %s", e)
+        return DEFAULT_TARIFF_RATES
+
 # Toshkent shahri uchun yo'l masofasi koeffitsienti.
 # Haversine (qush uchishi) masofasidan yo'ldagi masofa taxminan 35% ko'p.
 TASHKENT_ROAD_FACTOR = 1.35
@@ -145,14 +179,9 @@ def calculate_price(
     """
     distance_km = max(0.0, float(distance_km or 0))
 
-    # Har bir avtomobil klassi uchun tariflar (UZS)
-    rates = {
-        'economy':  {'base': 6000, 'km': 1500, 'per_min': 200, 'disc_1': 0.15, 'disc_2': 0.30},
-        'comfort':  {'base': 7000, 'km': 2000, 'per_min': 250, 'disc_1': 0.15, 'disc_2': 0.30},
-        'electro':  {'base': 7500, 'km': 2300, 'per_min': 280, 'disc_1': 0.20, 'disc_2': 0.40},
-        'business': {'base': 10000,'km': 2800, 'per_min': 350, 'disc_1': 0.20, 'disc_2': 0.40},
-    }
-    r = rates.get(category) or rates['economy']
+    # Har bir avtomobil klassi uchun tariflar (admin sozlamalaridan yoki standart)
+    rates = get_tariff_rates()
+    r = rates.get(category) or rates.get('economy') or DEFAULT_TARIFF_RATES['economy']
 
     # 1. Asosiy narx = bazaviy + masofa + vaqt
     duration_min = estimate_duration_minutes(distance_km)
