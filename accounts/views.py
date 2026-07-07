@@ -143,7 +143,8 @@ def verify_otp_view(request):
     user = User.objects.filter(phone=phone).first()
     
     # --- ANTI-FRAUD CHECK ---
-    device_id = request.data.get('device_id')
+    # device_id: mobil ilova uni X-Device-Id header orqali yuboradi (body'da ham bo'lishi mumkin)
+    device_id = request.data.get('device_id') or request.headers.get('X-Device-Id')
     x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
     ip = x_forwarded_for.split(',')[0] if x_forwarded_for else request.META.get('REMOTE_ADDR')
 
@@ -166,15 +167,22 @@ def verify_otp_view(request):
             'user': UserProfileSerializer(user).data
         })
 
-    # --- TAKRORIY AKKAUNT TEKSHIRUVI ---
-    # Bu yerga yetdik => shu telefon bilan akkaunt YO'Q, ya'ni yangi ro'yxatdan o'tish.
-    # Agar shu IP'dan allaqachon akkaunt ochilgan bo'lsa — bloklaymiz (bir qurilma = bitta akkaunt).
-    # Mavjud foydalanuvchi (yuqorida) istalgan IP'dan kira oladi; bu faqat YANGI akkauntga taalluqli.
-    if ip and User.objects.filter(registration_ip=ip).exists():
-        logger.info("Takroriy akkaunt urinishi bloklandi — IP: %s, telefon: %s", ip, phone)
-        _notify_admin_blocked_signup(phone, ip)
+    # --- TAKRORIY AKKAUNT TEKSHIRUVI (3 belgi: telefon + IP + qurilma) ---
+    # Bu yerga yetdik => shu TELEFON bilan akkaunt YO'Q (telefon o'zi unikal — 1-belgi).
+    # Yana ikki belgi bo'yicha tekshiramiz:
+    #   - IP manzil (registration_ip) — tarmoq darajasi
+    #   - device_id (qurilma) — "o'sha telefonda chiqib ketib qayta ochmoqchi" holati
+    # Ikkalasidan biri mavjud akkauntga mos kelsa — bloklaymiz va adminga xabar beramiz.
+    # Mavjud foydalanuvchi (yuqorida) istalgan IP/qurilmadan kira oladi; bu faqat YANGI akkauntga.
+    dup_by_device = bool(device_id) and User.objects.filter(device_id=device_id).exists()
+    dup_by_ip = bool(ip) and User.objects.filter(registration_ip=ip).exists()
+    if dup_by_device or dup_by_ip:
+        reason = 'Qurilma (device_id) takrorlandi' if dup_by_device else 'IP takrorlandi'
+        logger.info("Takroriy akkaunt bloklandi — %s | telefon: %s, IP: %s, device: %s",
+                    reason, phone, ip, device_id)
+        _notify_admin_blocked_signup(phone, ip, reason=reason)
         return Response({
-            'detail': 'Sizda allaqachon akkaunt mavjud — bu telefondan ro\'yxatdan '
+            'detail': 'Sizda allaqachon akkaunt mavjud — bu telefon/qurilmadan ro\'yxatdan '
                       'o\'tgansiz. Har bir qurilmadan faqat bitta akkaunt ochish mumkin.'
         }, status=409)
 
