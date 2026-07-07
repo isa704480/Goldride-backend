@@ -229,8 +229,12 @@ SIMPLE_JWT = {
     # Access token qisqa muddatli — o'g'irlansa zarar kam (avval 12 soat edi)
     'ACCESS_TOKEN_LIFETIME': timedelta(hours=1),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
-    'ROTATE_REFRESH_TOKENS': True,
-    'BLACKLIST_AFTER_ROTATION': True,
+    # Rotation O'CHIRILDI: avval har refresh'da yangi refresh token berilib, eskisi
+    # bloklanardi. Mijozlar (mobil/admin) yangi refreshni saqlamay eskisini ishlatgani
+    # uchun ~1 soatdan keyin refresh 401 berardi va foydalanuvchi tizimdan chiqib
+    # ketardi. Rotationsiz refresh token 30 kun barqaror ishlaydi.
+    'ROTATE_REFRESH_TOKENS': False,
+    'BLACKLIST_AFTER_ROTATION': False,
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
