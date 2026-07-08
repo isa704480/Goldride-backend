@@ -442,12 +442,25 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def register_driver_view(request):
-    """Register as a driver with vehicle details."""
-    if hasattr(request.user, 'driver_profile'):
-        return Response(
-            {'detail': 'Siz allaqachon haydovchi sifatida ro\'yxatdan o\'tgansiz.'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
+    """Register as a driver with vehicle details.
+
+    Idempotent: agar foydalanuvchida allaqachon haydovchi profili bo'lsa —
+      - approved  → mavjud profil qaytariladi (qayta yuborish shart emas)
+      - blocked   → 403 (bloklangan, qayta yuborib bo'lmaydi)
+      - pending/rejected → eski (tasdiqlanmagan) profil o'chirilib, yangisi
+        yaratiladi (foydalanuvchi hujjatlarini qayta yuborishi mumkin).
+    """
+    existing = getattr(request.user, 'driver_profile', None)
+    if existing:
+        if existing.status == 'approved':
+            return Response(DriverProfileSerializer(existing).data, status=status.HTTP_200_OK)
+        if existing.status == 'blocked':
+            return Response(
+                {'detail': 'Sizning haydovchi profilingiz bloklangan. Iltimos, admin bilan bog\'laning.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        # pending yoki rejected — eski profilni (va mashinani) o'chirib, qaytadan yaratamiz
+        existing.delete()
 
     serializer = DriverRegistrationSerializer(
         data=request.data,
