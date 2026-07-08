@@ -49,7 +49,11 @@ class SafeTokenRefreshView(_BaseTokenRefreshView):
         except (TokenError, InvalidToken):
             return Response({'detail': 'Token yaroqsiz. Qaytadan kiring.'}, status=401)
         except ObjectDoesNotExist:
-            return Response({'detail': 'Foydalanuvchi topilmadi. Qaytadan kiring.'}, status=401)
+            # Foydalanuvchi o'chirilgan — mijoz 'account_deleted' kodiga qarab xabar ko'rsatadi
+            return Response(
+                {'detail': 'Sizning akkauntingiz o\'chirilgan.', 'code': 'account_deleted'},
+                status=401
+            )
 
 
 def _notify_admin_blocked_signup(phone, ip, reason='IP takrorlandi'):
@@ -798,7 +802,27 @@ def admin_user_action(request, user_id):
     if action == 'toggle_active':
         user.is_active = not user.is_active
         user.save()
+    elif action == 'block':
+        user.is_blocked = True
+        user.is_active = False
+        user.block_reason = (request.data.get('reason') or '').strip()
+        user.blocked_at = timezone.now()
+        user.save(update_fields=['is_blocked', 'is_active', 'block_reason', 'blocked_at'])
+    elif action == 'unblock':
+        user.is_blocked = False
+        user.is_active = True
+        user.block_reason = ''
+        user.blocked_at = None
+        user.save(update_fields=['is_blocked', 'is_active', 'block_reason', 'blocked_at'])
     return Response(UserProfileSerializer(user).data)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAdminUser])
+def admin_blocked_users_view(request):
+    """Admin-only: bloklangan foydalanuvchilar ro'yxati (sabab bilan)."""
+    users = User.objects.filter(is_blocked=True).order_by('-blocked_at', '-id')
+    return Response(UserProfileSerializer(users, many=True).data)
 
 
 @api_view(['POST'])

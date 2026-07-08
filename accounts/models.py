@@ -88,6 +88,14 @@ class User(AbstractUser):
         default=False,
         verbose_name='Bloklangan'
     )
+    block_reason = models.CharField(
+        max_length=255, blank=True, default='',
+        verbose_name='Bloklash sababi'
+    )
+    blocked_at = models.DateTimeField(
+        null=True, blank=True,
+        verbose_name='Bloklangan vaqti'
+    )
     gold_points = models.DecimalField(
         max_digits=12,
         decimal_places=2,

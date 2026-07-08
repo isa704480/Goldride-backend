@@ -41,6 +41,7 @@ urlpatterns = [
     
     # Admin
     path('admin/users/', views.AdminUserListView.as_view(), name='admin-users'),
+    path('admin/users/blocked/', views.admin_blocked_users_view, name='admin-blocked-users'),
     path('admin/users/<int:pk>/', views.AdminUserDetailView.as_view(), name='admin-user-detail'),
     path('admin/users/<int:user_id>/action/', views.admin_user_action, name='admin-user-action'),
     path('admin/drivers/', views.AdminDriverListView.as_view(), name='admin-drivers'),
