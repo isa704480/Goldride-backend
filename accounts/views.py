@@ -715,6 +715,13 @@ class AdminUserDetailView(generics.RetrieveUpdateDestroyAPIView):
             return AdminUserCRUDSerializer
         return UserProfileSerializer
 
+    def perform_destroy(self, instance):
+        # Admin/staff akkauntini o'chirishga YO'L QO'YMAYMIZ (o'zini qamab qo'ymaslik uchun)
+        if instance.is_staff or instance.is_superuser:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied('Admin/staff foydalanuvchini o\'chirib bo\'lmaydi.')
+        instance.delete()
+
 class AdminDriverListView(generics.ListCreateAPIView):
     """Admin-only: List and Create drivers with profile info."""
     serializer_class = DriverProfileSerializer
