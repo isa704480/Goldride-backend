@@ -181,6 +181,7 @@ class DriverProfileSerializer(serializers.ModelSerializer):
 
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     net_earnings = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    taxi_park_name = serializers.CharField(source='taxi_park.name', read_only=True, default=None)
 
     class Meta:
         model = Driver
@@ -188,7 +189,11 @@ class DriverProfileSerializer(serializers.ModelSerializer):
             'id', 'user', 'license_number', 'status', 'status_display',
             'is_online', 'current_lat', 'current_lng', 'rating', 'total_rides',
             'total_earnings', 'commission_paid', 'net_earnings',
-            'vehicle', 'created_at'
+            'vehicle', 'created_at',
+            # Haydovchi hujjatlari (admin tekshiruvi uchun)
+            'license_photo', 'license_photo_back', 'passport_photo_front',
+            'passport_photo_back', 'face_id_photo', 'taxi_license_photo',
+            'taxi_park', 'taxi_park_name',
         ]
         read_only_fields = [
             'id', 'status', 'rating', 'total_rides',
