@@ -521,33 +521,51 @@ def register_driver_public_view(request):
             user.last_name = last_name
         user.save()
         
-    # Check if driver profile already exists
-    if hasattr(user, 'driver_profile'):
-        return Response(
-            {'detail': 'Ushbu telefon raqami bilan haydovchi allaqachon ro\'yxatdan o\'tgan.'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
+    vd = serializer.validated_data
 
-    # Park tanlangan bo'lsa — park tasdiqlashini kutadi (pending_park_approval)
-    # Park tanlanmagan bo'lsa — admin tasdiqlashini kutadi (solo haydovchi)
+    # Mavjud haydovchi profili — approved bo'lsa xato, aks holda qayta yuborishga ruxsat
+    existing = getattr(user, 'driver_profile', None)
+    if existing:
+        if existing.status == 'approved':
+            return Response(
+                {'detail': 'Ushbu telefon raqami bilan haydovchi allaqachon tasdiqlangan.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        existing.delete()  # pending/rejected — eskisini o'chirib qayta yaratamiz
+
+    # Park tanlangan bo'lsa — park tasdiqlashini kutadi; aks holda admin tasdiqlaydi
     driver = Driver.objects.create(
         user=user,
         license_number=license_number,
-        status='pending',          # Admin yoki park tomonidan tasdiqlanishi kerak
-        taxi_park=selected_park,   # None bo'lsa — solo
+        status='pending',
+        taxi_park=selected_park,
         intro_period_start=timezone.now(),
+        license_photo=vd.get('license_photo'),
+        license_photo_back=vd.get('license_photo_back'),
+        passport_photo_front=vd.get('passport_photo_front'),
+        passport_photo_back=vd.get('passport_photo_back'),
+        face_id_photo=vd.get('face_id_photo'),
+        taxi_license_photo=vd.get('taxi_license_photo'),
     )
-    
+
     # Create the Vehicle
     from .models import Vehicle
     Vehicle.objects.create(
         driver=driver,
-        make=serializer.validated_data['make'],
-        model=serializer.validated_data['vehicle_model'],
-        year=serializer.validated_data['year'],
-        color=serializer.validated_data['color'],
-        plate_number=serializer.validated_data['plate_number'],
-        vehicle_type=serializer.validated_data.get('vehicle_type', 'sedan'),
+        make=vd['make'],
+        model=vd['vehicle_model'],
+        year=vd['year'],
+        color=vd.get('color', 'white'),
+        plate_number=vd['plate_number'],
+        vehicle_type=vd.get('vehicle_type', 'sedan'),
+        photo=vd.get('photo'),
+        photo_back=vd.get('photo_back'),
+        photo_left=vd.get('photo_left'),
+        photo_right=vd.get('photo_right'),
+        interior_photo_1=vd.get('interior_photo_1'),
+        interior_photo_2=vd.get('interior_photo_2'),
+        tech_passport_photo_front=vd.get('tech_passport_photo_front'),
+        tech_passport_photo_back=vd.get('tech_passport_photo_back'),
     )
     
     # Create user Wallet (will be funded upon admin approval)
